@@ -16,23 +16,23 @@ import {
   KeyboardAvoidingView,
   Platform,
   Switch,
+  Animated,
+  Easing,
 } from 'react-native';
-import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaProvider, useSafeAreaInsets, initialWindowMetrics } from 'react-native-safe-area-context';
 import * as Speech from 'expo-speech';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { initDatabase, insertRecipe, getAllSavedRecipes, deleteRecipeById, RecipeRecord } from './src/db/database';
 import { askCulinaryHelper } from './src/services/aiService';
 
-// Layout was designed around a 370pt wheel; everything dial-related scales from that.
 const DESIGN_WHEEL_SIZE = 370;
-// Horizontal space used by the outer frame margin, border and padding.
 const FRAME_HORIZONTAL_INSET = 40;
 
 function getDialMetrics(windowWidth: number, windowHeight: number) {
   const size = Math.max(
     240,
-    Math.min(windowWidth - FRAME_HORIZONTAL_INSET, windowHeight * 0.55, 560)
+    Math.min(windowWidth - FRAME_HORIZONTAL_INSET, windowHeight * 0.52, 560)
   );
   const s = size / DESIGN_WHEEL_SIZE;
   return {
@@ -58,14 +58,35 @@ function circleBox(diameter: number) {
 }
 
 type MainTab = 'home' | 'search' | 'wheel' | 'butler' | 'profile';
-// How far the raised centre Dial button protrudes above the tab bar
 const TAB_CENTER_OVERHANG = 32;
 type Language = 'en' | 'fa';
 type FusionCuisine = 'American' | 'Japanese' | 'Chinese' | 'Mexican';
 type RecipeTab = 'nature' | 'ingredients' | 'steps' | 'secrets';
 
+type CourseBucket = 'all' | 'appetizers' | 'mains' | 'sides' | 'desserts' | 'snacks' | 'drinks';
+
+interface CourseBucketMeta {
+  id: CourseBucket;
+  titleEn: string;
+  titleFa: string;
+  icon: string;
+  subtitleEn: string;
+  subtitleFa: string;
+}
+
+const COURSE_BUCKETS: CourseBucketMeta[] = [
+  { id: 'all', titleEn: 'All Courses', titleFa: 'همه منو', icon: '🍽️', subtitleEn: 'Complete Culinary Selection', subtitleFa: 'تمام بخش‌های سفره' },
+  { id: 'appetizers', titleEn: 'Appetizers & Starters', titleFa: 'پیش‌غذا و اشتهاآور', icon: '🧆', subtitleEn: 'Warm Starters, Soups, Aush & Dolmeh', subtitleFa: 'آش، سوپ، کشک بادمجان، دلمه و کوفته' },
+  { id: 'mains', titleEn: 'Main Dishes & Royal Rice', titleFa: 'غذاهای اصلی و چلو', icon: '🍲', subtitleEn: 'Slow-Cooked Stews, Basmati & Charcoal Kabobs', subtitleFa: 'خورشت‌های جاافتاده، کباب‌ها و پلوهای مجلسی' },
+  { id: 'sides', titleEn: 'Sides, Relishes & Breads', titleFa: 'مخلفات، چاشنی و نان', icon: '🥗', subtitleEn: 'Boranis, Pickles, Fresh Herbs & Flatbreads', subtitleFa: 'سالادها، ترشیجات، بورانی و نان‌های سنتی' },
+  { id: 'desserts', titleEn: 'Desserts & Traditional Sweets', titleFa: 'دسرها و شیرینی‌های سنتی', icon: '🍮', subtitleEn: 'Saffron Puddings, Halva, Ice Creams & Confections', subtitleFa: 'شله زرد، فالوده، حلوا، مسقطی و شیرینی‌ها' },
+  { id: 'snacks', titleEn: 'Snacks, Kukus & Sandwiches', titleFa: 'ساندویچ، کوکو و خوراک سریع', icon: '🥪', subtitleEn: 'Herbed Frittatas, Croquettes & Street Sandwiches', subtitleFa: 'کوکوها، کتلت‌ها، شامی‌ها و ساندویچ‌های سنتی' },
+  { id: 'drinks', titleEn: 'Drinks & Royal Sharbats', titleFa: 'نوشیدنی‌ها و شربت‌های درباری', icon: '🫖', subtitleEn: 'Chilled Cordials, Churned Doogh & Saffron Tea', subtitleFa: 'شربت‌های گیاهی، دوغ سنتی و چای زعفرانی' },
+];
+
 interface CategoryData {
   id: string;
+  bucket: CourseBucket;
   titleEn: string;
   titleFa: string;
   persian: string;
@@ -292,653 +313,383 @@ const REGIONAL_PROVINCES: RegionalProvince[] = [
   },
 ];
 
-// Complete 12 Outer Categories enriched with newly provided index foods
-const OUTER_CATEGORIES: CategoryData[] = [
+const ALL_CATEGORIES: CategoryData[] = [
   {
     id: 'khoresh',
+    bucket: 'mains',
     titleEn: 'Khoresh',
     titleFa: 'خورشت',
     persian: 'خورشت‌ها',
     icon: '🍲',
     dishesEn: [
-      'Ghormeh Sabzi',
-      'Gheimeh Sibzamini',
-      'Fesenjan',
-      'Karafss (Celery)',
-      'Bademjan (Eggplant)',
-      'Aloo Esfenaj',
-      'Khoresht Rivas (Rhubarb)',
-      'Khoresht Kangar (Cardoon/Okra)',
-      'Khoresht Chaghaleh Badam',
-      'Khoresht Narengi (Tangerine)',
-      'Khoresht Morgh Torsh',
-      'Khoresht Qarch (Mushroom)',
-      'Khoresht Kadoo (Zucchini)',
-      'Khoresht Havij (Carrot)',
-      'Khoresht Aloocheh (Plum)',
-      'Khoresht Gheimeh Bademjan',
+      'Ghormeh Sabzi', 'Gheimeh Sibzamini', 'Fesenjan', 'Karafss (Celery)',
+      'Bademjan (Eggplant)', 'Aloo Esfenaj', 'Khoresht Rivas', 'Khoresht Kangar',
+      'Khoresht Chaghaleh Badam', 'Khoresht Narengi', 'Khoresht Morgh Torsh', 'Khoresht Qarch',
+      'Khoresht Kadoo', 'Khoresht Havij', 'Khoresht Aloocheh', 'Khoresht Gheimeh Bademjan',
     ],
     dishesFa: [
-      'قورمه سبزی اصیل جاافتاده',
-      'قیمه سیب‌زمینی و لیمو عمانی',
-      'فسنجان گردو و رب انار ملس',
-      'خورشت کرفس معطر نعنا جعفری',
-      'خورشت بادمجان غوره',
-      'خورشت آلو اسفناج مجلسی',
-      'خورشت ریواس کوهستانی',
-      'خورشت کنگر سنتی',
-      'خورشت چغاله بادام نوبرانه',
-      'خورشت نارنگی معطر',
-      'خورشت مرغ ترش شمالی',
-      'خورشت قارچ با گوشت یا مرغ',
-      'خورشت کدو سبز',
-      'خورشت هویج و آلو',
-      'خورشت آلوچه ترش',
-      'خورشت قیمه بادمجان مجلسی',
-    ],
-  },
-  {
-    id: 'aush',
-    titleEn: 'Aush',
-    titleFa: 'آش',
-    persian: 'آش، سوپ و اشکنه',
-    icon: '🥣',
-    dishesEn: [
-      'Aush Reshteh (Noodle & Herb)',
-      'Aush-e Jo (Pearl Barley)',
-      'Aush-e Doogh (Yogurt Herb)',
-      'Aush-e Shole Ghalamkar',
-      'Aush-e Anar (Pomegranate)',
-      'Aush-e Kashk (Whey & Chickpea)',
-      'Aush-e Shalgham (Turnip Comfort)',
-      'Aush-e Esfenaj (Spinach Lentil)',
-      'Ash Ab-Limoo o Abghooreh',
-      'Ash-e Sak (Spinach Sour Stew)',
-      'Ash-e Kalam Ghamari',
-      'Ash-e Mash (Mung Bean Soup)',
-      'Ash-e Miveh (Dried Fruit Soup)',
-      'Eshkeneh Aloo (Plum Eshkeneh)',
-      'Eshkeneh ba Rob-e Anar',
-      'Kalleh Joosh (Curd & Mint Soup)',
-      'Soup Gojeh Farangi (Tomato Soup)',
-      'Soup Piaz (Caramelized Onion)',
-      'Halim ba Goosht (Wheat Porridge)',
-    ],
-    dishesFa: [
-      'آش رشته مجلسی با کشک',
-      'آش جو لعاب‌دار سنتی',
-      'آش دوغ سرعین اردبیل',
-      'آش شله قلمکار درباری',
-      'آش انار ملس شیرازی',
-      'آش کشک و نخود',
-      'آش شلغم مقوی سرماخوردگی',
-      'آش اسفناج و عدس',
-      'آش آب‌لیمو و آبغوره ترش',
-      'آش ساک گرگانی با اسفناج',
-      'آش کلم قمری',
-      'آش ماش سنتی',
-      'آش میوه آذربایجان',
-      'اشکنه آلو ترش و شیرین',
-      'اشکنه با رب انار و پیاز داغ',
-      'کله‌جوش غلیظ با کشک و گردو',
-      'سوپ گوجه‌فرنگی و برنج',
-      'سوپ پیاز کاراملی سنتی',
-      'حلیم کشدار دارچینی با گوشت',
+      'قورمه سبزی اصیل جاافتاده', 'قیمه سیب‌زمینی و لیمو عمانی', 'فسنجان گردو و رب انار ملس', 'خورشت کرفس معطر نعنا جعفری',
+      'خورشت بادمجان غوره', 'خورشت آلو اسفناج مجلسی', 'خورشت ریواس کوهستانی', 'خورشت کنگر سنتی',
+      'خورشت چغاله بادام نوبرانه', 'خورشت نارنگی معطر', 'خورشت مرغ ترش شمالی', 'خورشت قارچ با گوشت یا مرغ',
+      'خورشت کدو سبز', 'خورشت هویج و آلو', 'خورشت آلوچه ترش', 'خورشت قیمه بادمجان مجلسی',
     ],
   },
   {
     id: 'rice',
+    bucket: 'mains',
     titleEn: 'Rice &\nTahdig',
     titleFa: 'برنج و\nته‌دیگ',
     persian: 'چلو و پلوها',
     icon: '🍚',
     dishesEn: [
-      'Chelow with Golden Potato Tahdig',
-      'Kateh ba Roghan Heyvani',
-      'Baghali Polo ba Mahiche',
-      'Zereshk Polo ba Morgh',
-      'Sabzi Polo ba Mahi',
-      'Tahchin Morgh o Goosht',
-      'Tahchin Esfenaj (Spinach Rice Cake)',
-      'Lubia Polo ba Tahdig',
-      'Albaloo Polo (Sour Cherry Rice)',
-      'Morassa Polo (Jeweled Rice)',
-      'Shirin Polo (Sweet Wedding Rice)',
-      'Kalam Polo Shirazi',
-      'Havij Polo (Carrot Rice)',
-      'Reshteh Polo (Noodle Rice)',
-      'Adas Polo ba Keshmesh o Khorma',
-      'Dami Baghali (Dried Bean Rice)',
-      'Mash Polo (Mung Bean Rice)',
-      'Polo ba Nokhod Sabz (Peas Rice)',
-      'Estamboli Polo ba Gojeh Farangi',
-      'Polo ba Goosht Charkhkardeh',
-      'Polo ba Jegar-e Morgh',
-      'Polo Yoonani (Greek Style Rice)',
+      'Chelow with Golden Potato Tahdig', 'Kateh ba Roghan Heyvani', 'Baghali Polo ba Mahiche', 'Zereshk Polo ba Morgh',
+      'Sabzi Polo ba Mahi', 'Tahchin Morgh o Goosht', 'Tahchin Esfenaj', 'Lubia Polo ba Tahdig',
+      'Albaloo Polo', 'Morassa Polo', 'Shirin Polo', 'Kalam Polo Shirazi',
+      'Havij Polo', 'Reshteh Polo', 'Adas Polo', 'Dami Baghali',
     ],
     dishesFa: [
-      'چلو با ته‌دیگ سیب‌زمینی زعفرانی',
-      'کته دودی با روغن حیوانی',
-      'باقالی پلو با ماهیچه مجلسی',
-      'زرشک پلو با مرغ زعفرانی',
-      'سبزی پلو با ماهی سفید',
-      'ته‌چین مرغ و گوشت قالبی',
-      'ته‌چین اسفناج زعفرانی',
-      'لوبیا پلو با گوشت تکه‌ای و ته‌دیگ',
-      'آلبالو پلو با کوفته قلقلی',
-      'مرصع پلو مجلسی با خلال و زرشک',
-      'شیرین پلو اعلا عروسی',
-      'کلم پلو شیرازی با ترخون و کوفته',
-      'هویج پلو زعفرانی',
-      'رشته پلو با گوشت قلقلی',
-      'عدس پلو با کشمش و خرما',
-      'دمی باقالی با نیمرو',
-      'ماش پلو سنتی',
-      'پلو با نخود سبز',
-      'استامبولی پلو دمی با سیب‌زمینی',
-      'پلو با گوشت چرخ‌کرده',
-      'پلو با جگر مرغ',
-      'پلو یونانی ایرانیزه',
+      'چلو با ته‌دیگ سیب‌زمینی زعفرانی', 'کته دودی با روغن حیوانی', 'باقالی پلو با ماهیچه مجلسی', 'زرشک پلو با مرغ زعفرانی',
+      'سبزی پلو با ماهی سفید', 'ته‌چین مرغ و گوشت قالبی', 'ته‌چین اسفناج زعفرانی', 'لوبیا پلو با گوشت تکه‌ای و ته‌دیگ',
+      'آلبالو پلو با کوفته قلقلی', 'مرصع پلو مجلسی با خلال و زرشک', 'شیرین پلو اعلا عروسی', 'کلم پلو شیرازی با ترخون و کوفته',
+      'هویج پلو زعفرانی', 'رشته پلو با گوشت قلقلی', 'عدس پلو با کشمش و خرما', 'دمی باقالی با نیمرو',
     ],
   },
   {
     id: 'kabob',
+    bucket: 'mains',
     titleEn: 'Kabob',
     titleFa: 'کباب',
     persian: 'کباب‌ها',
     icon: '🍢',
     dishesEn: [
-      'Kabob Koobideh',
-      'Joojeh Kabob with Saffron & Lemon',
-      'Kabab Barg',
-      'Shishlik (Lamb Chops)',
-      'Kabab Chenjeh',
-      'Kabab Torshi (Sour Pomegranate)',
-      'Kabab Tabei (Pan-Fried Kabab)',
-      'Kabab Hosseini (Skewered Stewed Kabab)',
-      'Kabab Bakhtiari',
-      'Dandeh Kabab (Kermanshah Ribs)',
-      'Shish Kabab (Traditional Skewered)',
-      'Kabab Yoonani (Greek Marinated Kabab)',
+      'Kabob Koobideh', 'Joojeh Kabob with Saffron & Lemon', 'Kabab Barg', 'Shishlik',
+      'Kabab Chenjeh', 'Kabab Torshi', 'Kabab Tabei', 'Kabab Hosseini', 'Dandeh Kabab',
     ],
     dishesFa: [
-      'کباب کوبیده زعفرانی مجلسی',
-      'جوجه کباب با زعفران و آبلیمو',
-      'کباب برگ فیله گوسفندی',
-      'شیشلیک شاندیز مشهد',
-      'کباب چنجه مغز راسته',
-      'کباب ترش گیلانی با گردو و چوچاق',
-      'کباب تابه‌ای سنتی با گوجه',
-      'کباب حسینی چوبی با دنبه و فلفل',
-      'کباب بختیاری ترکیبی',
-      'دنده کباب کرمانشاهی',
-      'شش کباب سیخی اصیل',
-      'کباب یونانی با ادویه خاص',
+      'کباب کوبیده زعفرانی مجلسی', 'جوجه کباب با زعفران و آبلیمو', 'کباب برگ فیله گوسفندی', 'شیشلیک شاندیز مشهد',
+      'کباب چنجه مغز راسته', 'کباب ترش گیلانی با گردو و چوچاق', 'کباب تابه‌ای سنتی با گوجه', 'کباب حسینی چوبی', 'دنده کباب کرمانشاهی',
     ],
   },
   {
     id: 'meatdishes',
+    bucket: 'mains',
     titleEn: 'Meat\nDishes',
     titleFa: 'غذاهای\nگوشتی',
     persian: 'غذاهای گوشتی',
     icon: '🍖',
     dishesEn: [
-      'Chelow Mahiche (Lamb Shank)',
-      'Chelow Gardan (Lamb Neck)',
-      'Beryani Isfahani in Sangak',
-      'Tas Kabab ba Beh (Quince & Meat Pot)',
-      'Khorak-e Zaban ba Gharch (Beef Tongue)',
-      'Khorak-e Maghz (Braised Brain)',
+      'Chelow Mahiche (Lamb Shank)', 'Chelow Gardan (Lamb Neck)', 'Beryani Isfahani in Sangak',
+      'Tas Kabab ba Beh', 'Khorak-e Zaban ba Gharch', 'Khorak-e Maghz',
     ],
     dishesFa: [
-      'چلو ماهیچه مجلسی شاه‌عباسی',
-      'چلو گردن گوسفندی نرم و زعفرانی',
-      'بریانی اصیل اصفهان در نان سنگک',
-      'تاس کباب با به و آلو',
-      'خوراک زبان با سس قارچ',
-      'خوراک مغز و سیر داغ',
+      'چلو ماهیچه مجلسی شاه‌عباسی', 'چلو گردن گوسفندی نرم و زعفرانی', 'بریانی اصیل اصفهان در نان سنگک',
+      'تاس کباب با به و آلو', 'خوراک زبان با سس قارچ', 'خوراک مغز و سیر داغ',
     ],
   },
   {
     id: 'chicken',
+    bucket: 'mains',
     titleEn: 'Chicken',
     titleFa: 'مرغ',
     persian: 'خوراک مرغ',
     icon: '🍗',
     dishesEn: [
-      'Morgh Zaferani (Saffron Braised)',
-      'Akbar Joojeh with Pomegranate Sauce',
-      'Morgh-e Shekam Por (Stuffed Chicken)',
-      'Kabab Deigi Morgh (Pan Chicken)',
-      'Morgh o Moz Polo',
+      'Morgh Zaferani (Saffron Braised)', 'Akbar Joojeh with Pomegranate Sauce',
+      'Morgh-e Shekam Por', 'Kabab Deigi Morgh', 'Morgh o Moz Polo',
     ],
     dishesFa: [
-      'مرغ زعفرانی غلیظ مجلسی',
-      'اکبر جوجه مازندرانی با سس انار',
-      'مرغ شکم‌پر با گردو و آلو',
-      'کباب تابه‌ای مرغ زعفرانی',
-      'مرغ پلو با موز',
+      'مرغ زعفرانی غلیظ مجلسی', 'اکبر جوجه مازندرانی با سس انار',
+      'مرغ شکم‌پر با گردو و آلو', 'کباب تابه‌ای مرغ زعفرانی', 'مرغ پلو با موز',
     ],
   },
   {
     id: 'seafood',
+    bucket: 'mains',
     titleEn: 'Sea Food',
     titleFa: 'دریایی',
     persian: 'ماهی و میگو',
     icon: '🐟',
     dishesEn: [
-      'Mahi Shekam Por (Stuffed Caspian Whitefish)',
-      'Ghalieh Mahi (Tamarind Herb Fish)',
-      'Mahi Sefid Polo ba Naranj',
-      'Maygoo Polo (Bushehri Spiced Shrimp)',
-      'Ghalieh Maygoo (Tamarind Shrimp Stew)',
+      'Mahi Shekam Por', 'Ghalieh Mahi', 'Mahi Sefid Polo ba Naranj', 'Maygoo Polo', 'Ghalieh Maygoo',
     ],
     dishesFa: [
-      'ماهی سفید شکم‌پر تنوری شمالی',
-      'قلیه ماهی جنوبی با تمبر هندی',
-      'سبزی پلو با ماهی سفید و نارنج',
-      'میگو پلو بوشهری با شنبلیله',
-      'قلیه میگو تمبر هندی',
+      'ماهی سفید شکم‌پر تنوری شمالی', 'قلیه ماهی جنوبی با تمبر هندی', 'سبزی پلو با ماهی سفید و نارنج', 'میگو پلو بوشهری', 'قلیه میگو تمبر هندی',
     ],
   },
-  {
-    id: 'bread',
-    titleEn: 'Bread',
-    titleFa: 'نان',
-    persian: 'نان‌های سنتی',
-    icon: '🫓',
-    dishesEn: [
-      'Nan-e Sangak (Gravel Oven Sourdough)',
-      'Nan-e Barbari with Sesame',
-      'Nan-e Lavash (Tandir Flatbread)',
-      'Nan-e Taftoon (Clay Oven)',
-      'Nan-e Shirmal (Sweet Saffron Milk Bread)',
-    ],
-    dishesFa: [
-      'نان سنگک سنتی داغ',
-      'نان بربری کنجدی تنوری',
-      'نان لواش نازک سنتی',
-      'نان تافتون محلی',
-      'نان شیرمال زعفرانی معطر',
-    ],
-  },
-  {
-    id: 'pastries',
-    titleEn: 'Pastries',
-    titleFa: 'شیرینی',
-    persian: 'شیرینی‌جات',
-    icon: '🧁',
-    dishesEn: [
-      'Sohan-e Qom (Sprouted Wheat Brittle)',
-      'Gaz-e Isfahan (Pistachio Nougat)',
-      'Zoolbia & Bamieh',
-      'Goosh-e Fil (Elephant Ear Pastry)',
-      'Masqati Shirazi (Starch & Rosewater)',
-      'Masqati Borideh in Strips',
-      'Shirini Keshmeshi (Raisin Cookies)',
-      'Baklava Yazdi with Cardamom',
-      'Ghotab (Almond Stuffed)',
-      'Shirini Nokhodchi (Chickpea Shortbread)',
-      'Shirini Zaban (Puff Pastry Tongue)',
-      'Shirini Papillon (Bowtie Pastry)',
-      'Pofak Gerdooyi (Walnut Meringue)',
-      'Nan Badami (Almond Pastry)',
-    ],
-    dishesFa: [
-      'سوهان قم کره‌ای با پسته',
-      'گز لقمه‌ای پسته اصفهان',
-      'زولبیا و بامیه ترد زعفرانی',
-      'گوش‌فیل شهددار ترد',
-      'مسقطی لاری معطر با خلال',
-      'مسقطی بریده نواری',
-      'شیرینی کشمشی ترد و نرم',
-      'باقلوای هل و گلاب یزد',
-      'قطاب پودر قندی سنتی',
-      'شیرینی نخودچی عید',
-      'شیرینی زبان هزارلا',
-      'شیرینی پاپیونی عسلی',
-      'پفک گردویی بازاری',
-      'نان بادامی سنتی',
-    ],
-  },
-  {
-    id: 'drinks',
-    titleEn: 'Drinks',
-    titleFa: 'نوشیدنی',
-    persian: 'شربت‌ها',
-    icon: '🫖',
-    dishesEn: [
-      'Doogh ba Gol-e Mohammadi & Mint',
-      'Sharbat-e Sekanjabin ba Khiar',
-      'Sharbat-e Khakshir (Descurainia)',
-      'Sharbat-e Tokhm-e Sharbati (Basil Seed)',
-      'Sharbat-e Golab (Rosewater Cordial)',
-      'Sharbat-e Ab-Limoo (Persian Lemonade)',
-      'Sharbat-e Beh-Limoo (Quince Lime)',
-      'Sharbat-e Zaferani (Saffron Syrup)',
-      'Sharbat-e Albaloo (Sour Cherry)',
-      'Chai Saffron & Cardamom Brew',
-    ],
-    dishesFa: [
-      'دوغ سنتی خنک با گل محمدی و نعنا',
-      'شربت سکنجبین و خیار رنده‌شده',
-      'شربت خاکشیر خنک و یخ‌مال',
-      'شربت تخم شربتی با گلاب',
-      'شربت گلاب ناب کاشان',
-      'شربت آبلیمو شیرازی با زعفران',
-      'شربت به لیمو اصیل',
-      'شربت زعفرانی درباری',
-      'شربت آلبالو خانگی',
-      'چای دم‌کشیده با هل و سرگل زعفران',
-    ],
-  },
-  {
-    id: 'torshi',
-    titleEn: 'Torshi',
-    titleFa: 'ترشی',
-    persian: 'ترشی، شور و مربا',
-    icon: '🫙',
-    dishesEn: [
-      'Torshi Liteh (Minced Eggplant Vinegar)',
-      'Torshi Seer (7-Year Aged Garlic)',
-      'Torshi Haft-e Bijar Gilani',
-      'Khiarshoor ba Tarkhoon (Tarragon Pickles)',
-      'Torshi Anbeh Bandari (Mango Pickle)',
-      'Nazkhatoon (Smoked Eggplant Relish)',
-      'Morabba Bahar Narenj (Orange Blossom Jam)',
-      'Morabba Poust-e Pesteh (Fresh Pistachio Peel Jam)',
-      'Morabba Balang (Citron Jam)',
-      'Morabba Beh (Quince Jam)',
-    ],
-    dishesFa: [
-      'ترشی لیته بادمجان و سیاه‌دانه',
-      'سیرترشی هفت‌ساله قهوه‌ای',
-      'ترشی هفت‌بیجار تند گیلان',
-      'خیارشور سنتی با ترخون و سیر',
-      'ترشی انبه بندری تند',
-      'نازخاتون شمالی با آبغوره و ریحان',
-      'مربای بهار نارنج شیراز',
-      'مربای پوست پسته تازه',
-      'مربای بالنگ معطر',
-      'مربای به زعفرانی نگینی',
-    ],
-  },
-  {
-    id: 'salads',
-    titleEn: 'Salads',
-    titleFa: 'سالاد',
-    persian: 'سالادها',
-    icon: '🥗',
-    dishesEn: [
-      'Salad Shirazi (Cucumber, Tomato, Verjuice)',
-      'Salad Olivieh with Chicken & Pickles',
-      'Zeytoon Parvardeh (Walnut Pomegranate Olives)',
-      'Salad Fasl ba Special Dressing',
-      'Salad Kahoo ba Sekanjabin Dressing',
-    ],
-    dishesFa: [
-      'سالاد شیرازی اصل با نعنا و آبغوره',
-      'سالاد الویه مرغ مجلسی با سس مایونز',
-      'زیتون پرورده رودبار با چوچاق',
-      'سالاد فصل با سس مخصوص',
-      'سالاد کاهو سنتی با سس سکنجبین',
-    ],
-  },
-];
-
-// Complete 12 Inner Categories enriched with newly provided index foods
-const INNER_CATEGORIES: CategoryData[] = [
   {
     id: 'abgosht',
+    bucket: 'mains',
     titleEn: 'Ab-Gosht',
     titleFa: 'آبگوشت',
     persian: 'دیزی و آبگوشت',
     icon: '🍲',
     dishesEn: [
-      'Traditional Dizi Sangak',
-      'Ab-Gosht Bozbash ba Sabzi',
-      'Ab-Gosht Kashk (Whey Stew)',
-      'Ab-Gosht Gandom (Wheat Abgoosht)',
-      'Ab-Gosht Na’na Jafari',
-      'Ab-Gosht Lapeh o Limoo Amani',
-      'Ab-Gosht Bademjan',
-      'Goushkobideh Setup ba Sabzi Khordan',
+      'Traditional Dizi Sangak', 'Ab-Gosht Bozbash ba Sabzi', 'Ab-Gosht Kashk',
+      'Ab-Gosht Gandom', 'Ab-Gosht Na’na Jafari', 'Ab-Gosht Lapeh o Limoo Amani',
     ],
     dishesFa: [
-      'دیزی سنگی با سنگک داغ و دنبه',
-      'آبگوشت بزباش با سبزیجات معطر',
-      'آبگوشت کشک اراکی',
-      'آبگوشت گندم سنتی',
-      'آبگوشت نعنا جعفری',
-      'آبگوشت لپه و لیمو عمانی',
-      'آبگوشت بادمجان و غوره',
-      'گوشت‌کوبیده سنتی با سبزی خوردن',
+      'دیزی سنگی با سنگک داغ و دنبه', 'آبگوشت بزباش با سبزیجات معطر', 'آبگوشت کشک اراکی',
+      'آبگوشت گندم سنتی', 'آبگوشت نعنا جعفری', 'آبگوشت لپه و لیمو عمانی',
+    ],
+  },
+  {
+    id: 'aush',
+    bucket: 'appetizers',
+    titleEn: 'Aush &\nSoups',
+    titleFa: 'آش و\nسوپ',
+    persian: 'آش و سوپ‌ها',
+    icon: '🥣',
+    dishesEn: [
+      'Aush Reshteh', 'Aush-e Jo', 'Aush-e Doogh', 'Aush-e Shole Ghalamkar',
+      'Aush-e Anar', 'Soup Gojeh Farangi', 'Soup Piaz', 'Kalleh Joosh',
+    ],
+    dishesFa: [
+      'آش رشته مجلسی با کشک', 'آش جو لعاب‌دار سنتی', 'آش دوغ سرعین اردبیل', 'آش شله قلمکار درباری',
+      'آش انار ملس شیرازی', 'سوپ گوجه‌فرنگی و برنج', 'سوپ پیاز کاراملی سنتی', 'کله‌جوش غلیظ با کشک و گردو',
     ],
   },
   {
     id: 'appetizers',
-    titleEn: 'Appetizers',
-    titleFa: 'پیش‌غذا',
-    persian: 'پیش‌غذاها',
+    bucket: 'appetizers',
+    titleEn: 'Hot\nStarters',
+    titleFa: 'پیش‌غذا\nگرم',
+    persian: 'پیش‌غذاهای گرم',
     icon: '🧆',
     dishesEn: [
-      'Mirza Ghasemi (Smoked Eggplant)',
-      'Kashk-e Bademjan (Eggplant Curd Dip)',
-      'Sabzi Khordan ba Panir-e Lighvan',
-      'Nargesi Esfenaj (Spinach & Eggs)',
-      'Baghali Ghatogh (Dill & Fava Beans)',
+      'Mirza Ghasemi', 'Kashk-e Bademjan', 'Baghali Ghatogh',
+      'Nargesi Esfenaj', 'Nazkhatoon',
     ],
     dishesFa: [
-      'میرزاقاسمی دودی با سیر تازه',
-      'کشک بادمجان مجلسی با نعنا داغ',
-      'سبزی خوردن و پنیر لیقوان تبریز',
-      'نرگسی اسفناج و سیر داغ',
-      'باقلا قاتوق اصیل با سیر و شوید',
-    ],
-  },
-  {
-    id: 'sandwiches',
-    titleEn: 'Sandwich',
-    titleFa: 'ساندویچ',
-    persian: 'ساندویچ‌های سنتی',
-    icon: '🥪',
-    dishesEn: [
-      'Sandwich Kotlet ba Khiarshoor o Gojeh',
-      'Sandwich Zaban (Beef Tongue in Baguette)',
-      'Sandwich Sosis Bandari (Spicy Sausage)',
-      'Sandwich Maghz (Braised Brain)',
-    ],
-    dishesFa: [
-      'ساندویچ کتلت مامان‌پز با خیارشور و گوجه',
-      'ساندویچ زبان گوساله سسی',
-      'سوسیس بندری تند و آتشین',
-      'ساندویچ مغز گوسفندی',
-    ],
-  },
-  {
-    id: 'kotlets',
-    titleEn: 'Kotlets',
-    titleFa: 'کتلت',
-    persian: 'کتلت‌ها',
-    icon: '🥩',
-    dishesEn: [
-      'Kotlet Goosht (Beef, Potato & Chickpea Flour)',
-      'Kotlet Morgh (Chicken Croquette)',
-      'Kotlet Mahi (Fish Croquette)',
-    ],
-    dishesFa: [
-      'کتلت گوشت زعفرانی با آرد نخودچی',
-      'کتلت مرغ ترد با جعفری',
-      'کتلت ماهی با ادویه کاری',
-    ],
-  },
-  {
-    id: 'icecream',
-    titleEn: 'Ice Cream',
-    titleFa: 'بستنی',
-    persian: 'بستنی و یخ در بهشت',
-    icon: '🍨',
-    dishesEn: [
-      'Bastani Sonnati (Saffron Cream Chunks)',
-      'Faloodeh Shirazi ba Ab-Limoo',
-      'Havij Bastani Float',
-      'Yakh dar Behesht (Ice from Paradise)',
-    ],
-    dishesFa: [
-      'بستنی سنتی خامه‌دار زعفرانی با پسته',
-      'فالوده شیرازی با آبلیموی تازه',
-      'آب هویج بستنی پر از خامه',
-      'یخ در بهشت سنتی زعفرانی یا میوه‌ای',
+      'میرزاقاسمی دودی با سیر تازه', 'کشک بادمجان مجلسی با نعنا داغ', 'باقلا قاتوق اصیل با سیر و شوید',
+      'نرگسی اسفناج و سیر داغ', 'نازخاتون شمالی با آبغوره و ریحان',
     ],
   },
   {
     id: 'dolmeh',
+    bucket: 'appetizers',
     titleEn: 'Dolmeh',
     titleFa: 'دلمه',
     persian: 'انواع دلمه',
     icon: '🍃',
     dishesEn: [
-      'Dolmeh Barg-e Mo (Grape Leaves with Herbs & Rice)',
-      'Dolmeh Bademjan (Stuffed Eggplant)',
-      'Dolmeh Felfel (Stuffed Bell Peppers)',
-      'Dolmeh Gojeh Farangi (Stuffed Tomatoes)',
-      'Dolmeh Piaz (Stuffed Sweet Onions)',
-      'Dolmeh Kalam Barg (Stuffed Cabbage Leaves)',
-      'Dolmeh Kadoo (Stuffed Zucchini)',
+      'Dolmeh Barg-e Mo', 'Dolmeh Bademjan', 'Dolmeh Felfel', 'Dolmeh Gojeh Farangi',
+      'Dolmeh Piaz', 'Dolmeh Kalam Barg',
     ],
     dishesFa: [
-      'دلمه برگ مو ملس تبریز با سرکه شیره',
-      'دلمه بادمجان بقچه‌ای شکم‌پر',
-      'دلمه فلفل دلمه‌ای رنگی مجلسی',
-      'دلمه گوجه فرنگی شکم‌پر',
-      'دلمه پیاز سفید لایه‌ای',
-      'دلمه کلم برگ ارومیه',
-      'دلمه کدو سبز شکم‌پر',
-    ],
-  },
-  {
-    id: 'kuku',
-    titleEn: 'Kuku',
-    titleFa: 'کوکو',
-    persian: 'کوکوها',
-    icon: '🍳',
-    dishesEn: [
-      'Kuku Sabzi with Barberries & Walnuts',
-      'Kuku Sibzamini (Crispy Potato Frittata)',
-      'Kuku Lobia Sabz (Green Bean & Saffron)',
-      'Kuku Shevid Baghala (Dill & Fava Bean Kuku)',
-      'Kuku Gol-Kalam (Cauliflower Kuku)',
-      'Kuku Morgh / Chaqartmeh (Chicken Herb Kuku)',
-      'Kuku Bademjan (Eggplant Kuku)',
-    ],
-    dishesFa: [
-      'کوکو سبزی پفکی با زرشک و گردو',
-      'کوکو سیب‌زمینی پخته یا خام ترد',
-      'کوکو لوبیا سبز تبریزی با گوشت',
-      'کوکو شوید باقلا اصیل',
-      'کوکو گل کلم با زعفران',
-      'کوکو مرغ و چغارتمه گیلانی',
-      'کوکو بادمجان کبابی',
-    ],
-  },
-  {
-    id: 'shami',
-    titleEn: 'Shami',
-    titleFa: 'شامی',
-    persian: 'شامی‌ها',
-    icon: '🍘',
-    dishesEn: [
-      'Shami Torsh Gilani (Sour Rösti Pot)',
-      'Shami Lapeh (Split Pea Fluffy Patties)',
-      'Shami Rashti with Pomegranate Glaze',
-      'Shami Baboli with Northern Herbs',
-    ],
-    dishesFa: [
-      'شامی ترش گیلانی در سس رب انار',
-      'شامی لپه پوک ترد با زعفران',
-      'شامی رشتی آبدار',
-      'شامی بابلی معطر شمالی',
+      'دلمه برگ مو ملس تبریز با سرکه شیره', 'دلمه بادمجان بقچه‌ای شکم‌پر', 'دلمه فلفل دلمه‌ای رنگی مجلسی', 'دلمه گوجه فرنگی شکم‌پر',
+      'دلمه پیاز سفید لایه‌ای', 'دلمه کلم برگ ارومیه',
     ],
   },
   {
     id: 'kofteh',
+    bucket: 'appetizers',
     titleEn: 'Kofteh',
     titleFa: 'کوفته',
     persian: 'کوفته‌ها',
     icon: '🧆',
     dishesEn: [
-      'Kofteh Tabrizi with Egg, Walnut & Prune',
-      'Kofteh Berenji (Rice Meatballs)',
-      'Kofteh Tokhm-e Morghi (Egg Meatballs)',
-      'Kofteh Ghelgheli in Tomato Mint Sauce',
+      'Kofteh Tabrizi', 'Kofteh Berenji', 'Kofteh Tokhm-e Morghi', 'Kofteh Ghelgheli',
     ],
     dishesFa: [
-      'کوفته تبریزی بزرگ با تخم‌مرغ و آلو',
-      'کوفته برنجی اصفهان با سبزی معطر',
-      'کوفته تخم‌مرغی مغزدار',
-      'کوفته قلقلی در سس گوجه و نعنا',
+      'کوفته تبریزی بزرگ با تخم‌مرغ و آلو', 'کوفته برنجی اصفهان با سبزی معطر', 'کوفته تخم‌مرغی مغزدار', 'کوفته قلقلی در سس گوجه و نعنا',
     ],
   },
   {
     id: 'borani',
+    bucket: 'sides',
     titleEn: 'Borani',
     titleFa: 'بورانی',
-    persian: 'بورانی‌ها',
+    persian: 'بورانی و ماست',
     icon: '🥣',
     dishesEn: [
-      'Borani Esfenaj (Spinach Strained Yogurt)',
-      'Borani Bademjan (Charred Eggplant Yogurt)',
-      'Borani Kadoo (Sautéed Zucchini Yogurt)',
-      'Borani Kangar (Wild Acanthus Yogurt)',
+      'Borani Esfenaj', 'Borani Bademjan', 'Borani Kadoo', 'Borani Kangar', 'Mast-o Khiar ba Gol-e Mohammadi',
     ],
     dishesFa: [
-      'بورانی اسفناج و ماست چکیده موسیر',
-      'بورانی بادمجان کبابی دودی',
-      'بورانی کدو سبز با نعنا خشک',
-      'بورانی کنگر بهاری با سیر',
+      'بورانی اسفناج و ماست چکیده موسیر', 'بورانی بادمجان کبابی دودی', 'بورانی کدو سبز با نعنا خشک', 'بورانی کنگر بهاری با سیر', 'ماست و خیار سنتی با گل سرخ',
     ],
   },
   {
-    id: 'desserts',
-    titleEn: 'Desserts',
-    titleFa: 'دسرها',
-    persian: 'دسر و پس‌غذا',
-    icon: '🍮',
+    id: 'salads',
+    bucket: 'sides',
+    titleEn: 'Salads',
+    titleFa: 'سالاد',
+    persian: 'سالادها',
+    icon: '🥗',
     dishesEn: [
-      'Sholeh Zard (Saffron Rice Pudding with Cinnamon)',
-      'Ferni (Rice Flour & Rosewater Porridge)',
-      'Halwa Zafarani ba Golab (Saffron Halwa)',
-      'Ranginak (Date, Walnut & Toasted Flour)',
-      'Khoresht-e Mast (Sweet Saffron Lamb Yogurt)',
+      'Salad Shirazi', 'Salad Olivieh', 'Zeytoon Parvardeh', 'Salad Fasl ba Special Dressing', 'Salad Kahoo ba Sekanjabin',
     ],
     dishesFa: [
-      'شله زرد نذری زعفرانی با خلال بادام و پسته',
-      'فرنی ابریشمی با آرد برنج و گلاب',
-      'حلوای تیره زعفرانی مجلسی',
-      'رنگینک خرمایی بوشهری با گردو و دارچین',
-      'خورشت ماست شیرین اصفهان با گردن',
+      'سالاد شیرازی اصل با نعنا و آبغوره', 'سالاد الویه مرغ مجلسی با سس مایونز', 'زیتون پرورده رودبار با چوچاق', 'سالاد فصل با سس مخصوص', 'سالاد کاهو سنتی با سس سکنجبین',
+    ],
+  },
+  {
+    id: 'torshi',
+    bucket: 'sides',
+    titleEn: 'Torshi',
+    titleFa: 'ترشی',
+    persian: 'ترشی و شور',
+    icon: '🫙',
+    dishesEn: [
+      'Torshi Liteh', 'Torshi Seer (7-Year Garlic)', 'Torshi Haft-e Bijar', 'Khiarshoor ba Tarkhoon', 'Torshi Anbeh Bandari',
+    ],
+    dishesFa: [
+      'ترشی لیته بادمجان و سیاه‌دانه', 'سیرترشی هفت‌ساله قهوه‌ای', 'ترشی هفت‌بیجار تند گیلان', 'خیارشور سنتی با ترخون و سیر', 'ترشی انبه بندری تند',
+    ],
+  },
+  {
+    id: 'bread',
+    bucket: 'sides',
+    titleEn: 'Bread',
+    titleFa: 'نان',
+    persian: 'نان‌های سنتی',
+    icon: '🫓',
+    dishesEn: [
+      'Nan-e Sangak', 'Nan-e Barbari with Sesame', 'Nan-e Lavash', 'Nan-e Taftoon', 'Nan-e Shirmal',
+    ],
+    dishesFa: [
+      'نان سنگک سنتی داغ', 'نان بربری کنجدی تنوری', 'نان لواش نازک سنتی', 'نان تافتون محلی', 'نان شیرمال زعفرانی معطر',
+    ],
+  },
+  {
+    id: 'sandwiches',
+    bucket: 'snacks',
+    titleEn: 'Sandwich',
+    titleFa: 'ساندویچ',
+    persian: 'ساندویچ‌ها',
+    icon: '🥪',
+    dishesEn: [
+      'Sandwich Kotlet ba Khiarshoor o Gojeh', 'Sandwich Zaban', 'Sandwich Sosis Bandari', 'Sandwich Maghz',
+    ],
+    dishesFa: [
+      'ساندویچ کتلت مامان‌پز با خیارشور و گوجه', 'ساندویچ زبان گوساله سسی', 'سوسیس بندری تند و آتشین', 'ساندویچ مغز گوسفندی',
+    ],
+  },
+  {
+    id: 'kotlets',
+    bucket: 'snacks',
+    titleEn: 'Kotlets',
+    titleFa: 'کتلت',
+    persian: 'کتلت‌ها',
+    icon: '🥩',
+    dishesEn: [
+      'Kotlet Goosht', 'Kotlet Morgh', 'Kotlet Mahi',
+    ],
+    dishesFa: [
+      'کتلت گوشت زعفرانی با آرد نخودچی', 'کتلت مرغ ترد با جعفری', 'کتلت ماهی با ادویه کاری',
+    ],
+  },
+  {
+    id: 'kuku',
+    bucket: 'snacks',
+    titleEn: 'Kuku',
+    titleFa: 'کوکو',
+    persian: 'کوکوها',
+    icon: '🍳',
+    dishesEn: [
+      'Kuku Sabzi with Barberries & Walnuts', 'Kuku Sibzamini', 'Kuku Lobia Sabz',
+      'Kuku Shevid Baghala', 'Kuku Gol-Kalam', 'Kuku Morgh / Chaqartmeh',
+    ],
+    dishesFa: [
+      'کوکو سبزی پفکی با زرشک و گردو', 'کوکو سیب‌زمینی پخته یا خام ترد', 'کوکو لوبیا سبز تبریزی با گوشت',
+      'کوکو شوید باقلا اصیل', 'کوکو گل کلم با زعفران', 'کوکو مرغ و چغارتمه گیلانی',
+    ],
+  },
+  {
+    id: 'shami',
+    bucket: 'snacks',
+    titleEn: 'Shami',
+    titleFa: 'شامی',
+    persian: 'شامی‌ها',
+    icon: '🍘',
+    dishesEn: [
+      'Shami Torsh Gilani', 'Shami Lapeh', 'Shami Rashti with Pomegranate Glaze', 'Shami Baboli',
+    ],
+    dishesFa: [
+      'شامی ترش گیلانی در سس رب انار', 'شامی لپه پوک ترد با زعفران', 'شامی رشتی آبدار', 'شامی بابلی معطر شمالی',
     ],
   },
   {
     id: 'khorak',
+    bucket: 'snacks',
     titleEn: 'Khorak',
     titleFa: 'خوراک',
     persian: 'خوراک‌های گرم',
     icon: '🥘',
     dishesEn: [
-      'Khorak-e Loobia Chiti (Pinto Bean Pot with Mushroom)',
-      'Khorak-e Morgh o Gharch (Chicken & Mushroom)',
-      'Khorak-e Zaban ba Sauce (Braised Beef Tongue)',
+      'Khorak-e Loobia Chiti', 'Khorak-e Morgh o Gharch', 'Khorak-e Zaban ba Sauce',
     ],
     dishesFa: [
-      'خوراک لوبیا چیتی لعاب‌دار با قارچ',
-      'خوراک مرغ و قارچ سسی با فلفل دلمه',
-      'خوراک زبان با سس خامه و قارچ',
+      'خوراک لوبیا چیتی لعاب‌دار با قارچ', 'خوراک مرغ و قارچ سسی با فلفل دلمه', 'خوراک زبان با سس خامه و قارچ',
+    ],
+  },
+  {
+    id: 'desserts',
+    bucket: 'desserts',
+    titleEn: 'Desserts',
+    titleFa: 'دسرها',
+    persian: 'دسر و پس‌غذا',
+    icon: '🍮',
+    dishesEn: [
+      'Sholeh Zard', 'Ferni', 'Halwa Zafarani ba Golab',
+      'Ranginak', 'Khoresht-e Mast',
+    ],
+    dishesFa: [
+      'شله زرد نذری زعفرانی با خلال بادام و پسته', 'فرنی ابریشمی با آرد برنج و گلاب', 'حلوای تیره زعفرانی مجلسی',
+      'رنگینک خرمایی بوشهری با گردو و دارچین', 'خورشت ماست شیرین اصفهان با گردن',
+    ],
+  },
+  {
+    id: 'pastries',
+    bucket: 'desserts',
+    titleEn: 'Pastries',
+    titleFa: 'شیرینی',
+    persian: 'شیرینی‌جات',
+    icon: '🧁',
+    dishesEn: [
+      'Sohan-e Qom', 'Gaz-e Isfahan', 'Zoolbia & Bamieh', 'Goosh-e Fil',
+      'Masqati Shirazi', 'Masqati Borideh in Strips', 'Shirini Keshmeshi',
+      'Baklava Yazdi', 'Ghotab', 'Shirini Nokhodchi', 'Shirini Zaban',
+    ],
+    dishesFa: [
+      'سوهان قم کره‌ای با پسته', 'گز لقمه‌ای پسته اصفهان', 'زولبیا و بامیه ترد زعفرانی', 'گوش‌فیل شهددار ترد',
+      'مسقطی لاری معطر با خلال', 'مسقطی بریده نواری', 'شیرینی کشمشی ترد و نرم',
+      'باقلوای هل و گلاب یزد', 'قطاب پودر قندی سنتی', 'شیرینی نخودچی عید', 'شیرینی زبان هزارلا',
+    ],
+  },
+  {
+    id: 'icecream',
+    bucket: 'desserts',
+    titleEn: 'Ice Cream',
+    titleFa: 'بستنی',
+    persian: 'بستنی و یخ در بهشت',
+    icon: '🍨',
+    dishesEn: [
+      'Bastani Sonnati', 'Faloodeh Shirazi ba Ab-Limoo', 'Havij Bastani Float', 'Yakh dar Behesht',
+    ],
+    dishesFa: [
+      'بستنی سنتی خامه‌دار زعفرانی با پسته', 'فالوده شیرازی با آبلیموی تازه', 'آب هویج بستنی پر از خامه', 'یخ در بهشت سنتی زعفرانی یا میوه‌ای',
+    ],
+  },
+  {
+    id: 'drinks',
+    bucket: 'drinks',
+    titleEn: 'Drinks',
+    titleFa: 'نوشیدنی',
+    persian: 'شربت‌ها',
+    icon: '🫖',
+    dishesEn: [
+      'Doogh ba Gol-e Mohammadi & Mint', 'Sharbat-e Sekanjabin ba Khiar', 'Sharbat-e Khakshir',
+      'Sharbat-e Tokhm-e Sharbati', 'Sharbat-e Golab', 'Sharbat-e Ab-Limoo',
+      'Sharbat-e Beh-Limoo', 'Sharbat-e Zaferani', 'Sharbat-e Albaloo', 'Chai Saffron & Cardamom Brew',
+    ],
+    dishesFa: [
+      'دوغ سنتی خنک با گل محمدی و نعنا', 'شربت سکنجبین و خیار رنده‌شده', 'شربت خاکشیر خنک و یخ‌مال',
+      'شربت تخم شربتی با گلاب', 'شربت گلاب ناب کاشان', 'شربت آبلیمو شیرازی با زعفران',
+      'شربت به لیمو اصیل', 'شربت زعفرانی درباری', 'شربت آلبالو خانگی', 'چای دم‌کشیده با هل و سرگل زعفران',
     ],
   },
 ];
 
-// Interactive Segmented Tabbed Recipe View Component
 function RecipeTabbedDisplay({
   parsed,
   lang,
@@ -979,7 +730,13 @@ function RecipeTabbedDisplay({
 
   return (
     <View style={{ flex: 1 }}>
-      {/* Info chips: prep, cook, temperament */}
+      {/* Universal Floating Stop Button when audio is reading */}
+      {isSpeaking && (
+        <TouchableOpacity style={styles.floatingStopBar} onPress={onStopSpeech} activeOpacity={0.85}>
+          <Text style={styles.floatingStopText}>⏹️ {lang === 'fa' ? 'توقف پخش صدا' : 'Stop Narration'}</Text>
+        </TouchableOpacity>
+      )}
+
       <View style={styles.chipRow}>
         <View style={styles.infoChip}>
           <Text style={styles.infoChipLabel}>{lang === 'fa' ? 'آماده‌سازی' : 'Prep'}</Text>
@@ -1001,7 +758,6 @@ function RecipeTabbedDisplay({
         </TouchableOpacity>
       </View>
 
-      {/* Macros: one stat card */}
       <View style={styles.macroCard}>
         {[
           { label: lang === 'fa' ? 'کالری' : 'Calories', value: parsed.calories },
@@ -1021,7 +777,6 @@ function RecipeTabbedDisplay({
           : `Per serving • ${parsed.servingSize}`}
       </Text>
 
-      {/* Section tabs */}
       <View style={styles.recipeTabBarContainer}>
         {([
           { key: 'nature', label: lang === 'fa' ? 'طبع' : 'Nature' },
@@ -1041,7 +796,6 @@ function RecipeTabbedDisplay({
         ))}
       </View>
 
-      {/* ACTIVE TAB CONTENT DISPLAY */}
       {activeTab === 'nature' && (
         <View style={styles.recipeSectionBlock}>
           <View style={styles.sectionHeaderFlex}>
@@ -1103,7 +857,7 @@ function RecipeTabbedDisplay({
             <Text style={[styles.recipeSectionHeading, isRTL ? styles.textRTL : styles.textLTR]}>
               🍳 {parsed.sec3Title}
             </Text>
-            {isSpeaking && speakingSection?.startsWith('step_') && (
+            {isSpeaking && (
               <TouchableOpacity style={[styles.miniAudioBtn, styles.miniAudioBtnActive]} onPress={onStopSpeech}>
                 <Text style={styles.miniAudioText}>⏹️ Stop</Text>
               </TouchableOpacity>
@@ -1134,6 +888,14 @@ function RecipeTabbedDisplay({
               >
                 <Text style={styles.stepControlBtnText}>⏭️ {lang === 'fa' ? 'بعد' : 'Next'}</Text>
               </TouchableOpacity>
+              {isSpeaking && (
+                <TouchableOpacity
+                  style={[styles.stepControlBtn, { backgroundColor: '#ef4444' }]}
+                  onPress={onStopSpeech}
+                >
+                  <Text style={styles.stepControlBtnText}>⏹️</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </View>
 
@@ -1183,28 +945,19 @@ function RecipeTabbedDisplay({
   );
 }
 
-function PersianAppContent() {
+function PersianAppInner() {
   const insets = useSafeAreaInsets();
   const { width: winWidth, height: winHeight } = useWindowDimensions();
   const dial = getDialMetrics(winWidth, winHeight);
-  const wheelStyles = {
-    viewport: { width: dial.size, height: dial.size },
-    container: { width: dial.size, height: dial.size },
-    background: { width: dial.size, height: dial.size },
-    image: { borderRadius: dial.size / 2 },
-    medallion: circleBox(dial.medallion),
-    badge: { width: dial.badgeW, height: dial.badgeH },
-    regional: { width: dial.regionalW, height: dial.badgeH },
-    headerSide: { width: dial.headerSideW },
-  };
   const [lang, setLang] = useState<Language>('en');
 
+  const [selectedBucket, setSelectedBucket] = useState<CourseBucket>('all');
   const [selectedCategory, setSelectedCategory] = useState<CategoryData | null>(null);
   const [activeDish, setActiveDish] = useState<string | null>(null);
   const [recipeContent, setRecipeContent] = useState<string>('');
   const [parsedRecipe, setParsedRecipe] = useState<ParsedRecipe | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
-  const [activeTab, setActiveTab] = useState<MainTab>('wheel');
+  const [activeTab, setActiveTab] = useState<MainTab>('home');
   const [tabBarHeight, setTabBarHeight] = useState<number>(0);
   const searchInputRef = useRef<React.ComponentRef<typeof TextInput>>(null);
   const [showCookbook, setShowCookbook] = useState<boolean>(false);
@@ -1214,9 +967,7 @@ function PersianAppContent() {
   const [savedRecipes, setSavedRecipes] = useState<RecipeRecord[]>([]);
   const [magnifiedId, setMagnifiedId] = useState<string | null>(null);
 
-  // Search feature states
   const [searchQuery, setSearchQuery] = useState<string>('');
-
   const [isHomeSurpriseActive, setIsHomeSurpriseActive] = useState<boolean>(false);
   const [subModalMode, setSubModalMode] = useState<'dial' | 'recipe'>('dial');
   const [showTemperamentInfo, setShowTemperamentInfo] = useState<boolean>(false);
@@ -1227,7 +978,6 @@ function PersianAppContent() {
   const [currentStepIndex, setCurrentStepIndex] = useState<number>(0);
   const [speechRate, setSpeechRate] = useState<number>(0.85);
 
-  // Butler State
   const [isFusionEnabled, setIsFusionEnabled] = useState<boolean>(false);
   const [selectedCuisine, setSelectedCuisine] = useState<FusionCuisine>('American');
   const [guestCount, setGuestCount] = useState<string>('');
@@ -1239,6 +989,15 @@ function PersianAppContent() {
   const [parsedButlerRecipe, setParsedButlerRecipe] = useState<ParsedRecipe | null>(null);
   const [butlerSuggestLoading, setButlerSuggestLoading] = useState<boolean>(false);
   const [butlerRecipeLoading, setButlerRecipeLoading] = useState<boolean>(false);
+
+  // Wheel of Fortune Spin Animation State
+  const [isSpinning, setIsSpinning] = useState<boolean>(false);
+  const [spinLightIndex, setSpinLightIndex] = useState<number>(0);
+  const spinAnim = useRef(new Animated.Value(0)).current;
+
+  // Surprise Me Foreground Selection & Confirmation Dialog State
+  const [showSurpriseModal, setShowSurpriseModal] = useState<boolean>(false);
+  const [spinResultDish, setSpinResultDish] = useState<{ dish: string; category: CategoryData } | null>(null);
 
   const butlerScrollRef = useRef<ScrollView>(null);
   const timeMeal = getTimeOfDaySuggestion();
@@ -1256,10 +1015,16 @@ function PersianAppContent() {
     setSavedRecipes(list);
   };
 
+  const displayedCategories = useMemo(() => {
+    if (selectedBucket === 'all') {
+      return ALL_CATEGORIES;
+    }
+    return ALL_CATEGORIES.filter((c) => c.bucket === selectedBucket);
+  }, [selectedBucket]);
+
   const allDishesIndexed = useMemo(() => {
     const list: { dishEn: string; dishFa: string; categoryEn: string; categoryFa: string; icon: string; category: CategoryData }[] = [];
-    const combinedCats = OUTER_CATEGORIES.concat(INNER_CATEGORIES);
-    combinedCats.forEach((cat) => {
+    ALL_CATEGORIES.forEach((cat) => {
       cat.dishesEn.forEach((dEn, idx) => {
         const dFa = cat.dishesFa[idx] || dEn;
         list.push({
@@ -1287,6 +1052,7 @@ function PersianAppContent() {
     );
   }, [searchQuery, allDishesIndexed]);
 
+  // Explicit, non-repeating audio engine
   const speakSanitizedText = (text: string, sectionKey: string) => {
     Speech.stop();
     const cleanScript = cleanForSpeech(text);
@@ -1373,6 +1139,49 @@ Adhere strictly to the required tags and no asterisks:
     }
   };
 
+  // Wheel Spin Execution on selected course
+  const triggerWheelSpinForCourse = (courseId: CourseBucket) => {
+    setShowSurpriseModal(false);
+    setSelectedBucket(courseId);
+    setSpinResultDish(null);
+    setIsSpinning(true);
+
+    const eligibleCategories = courseId === 'all'
+      ? ALL_CATEGORIES
+      : ALL_CATEGORIES.filter((c) => c.bucket === courseId);
+
+    const targetCategory = eligibleCategories.length > 0
+      ? eligibleCategories[Math.floor(Math.random() * eligibleCategories.length)]
+      : ALL_CATEGORIES[0];
+
+    const dishList = lang === 'fa' ? targetCategory.dishesFa : targetCategory.dishesEn;
+    const targetDish = dishList[Math.floor(Math.random() * dishList.length)];
+
+    let lightTimer: any = null;
+    let stepCount = 0;
+    const totalSteps = 30;
+    lightTimer = setInterval(() => {
+      setSpinLightIndex((prev) => (prev + 1) % eligibleCategories.length);
+      stepCount++;
+      if (stepCount >= totalSteps) {
+        clearInterval(lightTimer);
+      }
+    }, 100);
+
+    spinAnim.setValue(0);
+    Animated.timing(spinAnim, {
+      toValue: 7,
+      duration: 3200,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start(() => {
+      clearInterval(lightTimer);
+      setIsSpinning(false);
+      // Presents confirmation modal with chosen dish (Ask Yes/No)
+      setSpinResultDish({ dish: targetDish, category: targetCategory });
+    });
+  };
+
   const handleConsultButler = async () => {
     stopActiveSpeech();
     setButlerSuggestLoading(true);
@@ -1381,31 +1190,38 @@ Adhere strictly to the required tags and no asterisks:
     setButlerRecipeText('');
     setParsedButlerRecipe(null);
 
+    const activeBucketMeta = COURSE_BUCKETS.find((b) => b.id === selectedBucket);
+    const bucketFocus = selectedBucket !== 'all'
+      ? `Focus strictly on course category: "${activeBucketMeta?.titleEn}" (${activeBucketMeta?.titleFa}).`
+      : 'Harmonious multi-course banquet design.';
+
     let prompt = '';
     if (isFusionEnabled) {
       prompt = `You are the authentic Persian Royal Dining Host & Butler (میزبان), specializing in creative Persian-${selectedCuisine} fusion banquet design.
+${bucketFocus}
 Target Culture: ${selectedCuisine} cuisine fused with authentic Persian spices, herbs, and techniques.
 Guests: ${guestCount || '4'}. Allergies: ${allergiesInput || 'None'}. Preferences: ${specialPreferences || `Innovative Persian-${selectedCuisine} harmony`}.
 Craft an inventive 5-course Persian-${selectedCuisine} Fusion banquet.
 Respond ONLY with a valid JSON array of 5 objects with no markdown fences, formatted as:
 [
-  {"dish": "Fusion Main Course", "category": "Fusion", "icon": "🍲", "role": "${lang === 'fa' ? `غذای اصلی فیوژن ${selectedCuisine}` : `Main (${selectedCuisine} Fusion)`}"},
-  {"dish": "Fusion Rice or Starch Base", "category": "Fusion", "icon": "🍚", "role": "${lang === 'fa' ? 'پایه برنج یا کربوهیدرات' : 'Starch Foundation'}"},
-  {"dish": "Fusion Starter / Appetizer", "category": "Fusion", "icon": "🥪", "role": "${lang === 'fa' ? 'پیش‌غذا فیوژن' : 'Appetizer'}"},
-  {"dish": "Fusion Salad / Side", "category": "Fusion", "icon": "🥗", "role": "${lang === 'fa' ? 'سالاد و چاشنی مصلح' : 'Balanced Side'}"},
-  {"dish": "Fusion Dessert or Beverage", "category": "Fusion", "icon": "🍨", "role": "${lang === 'fa' ? 'دسر یا نوشیدنی فیوژن' : 'Sweet Finish'}"}
+  {"dish": "Fusion Dish 1", "category": "Fusion", "icon": "🍲", "role": "${lang === 'fa' ? `غذای اول فیوژن ${selectedCuisine}` : `Item 1 (${selectedCuisine} Fusion)`}"},
+  {"dish": "Fusion Dish 2", "category": "Fusion", "icon": "🍚", "role": "${lang === 'fa' ? 'غذای دوم فیوژن' : 'Item 2'}"},
+  {"dish": "Fusion Dish 3", "category": "Fusion", "icon": "🥪", "role": "${lang === 'fa' ? 'پیش‌غذا یا همراه' : 'Item 3'}"},
+  {"dish": "Fusion Dish 4", "category": "Fusion", "icon": "🥗", "role": "${lang === 'fa' ? 'چاشنی یا سالاد' : 'Item 4'}"},
+  {"dish": "Fusion Dish 5", "category": "Fusion", "icon": "🍨", "role": "${lang === 'fa' ? 'دسر یا نوشیدنی' : 'Sweet Finish'}"}
 ]`;
     } else {
       prompt = `You are the authentic Persian Royal Dining Host & Butler (میزبان).
+${bucketFocus}
 Guests: ${guestCount || '4'}. Allergies: ${allergiesInput || 'None'}. Preferences: ${specialPreferences || 'Classic balanced banquet'}.
-Recommend a harmonious 5-dish authentic Persian banquet.
+Recommend a harmonious 5-dish authentic Persian banquet matching this focus.
 Respond ONLY with a valid JSON array of 5 objects with no markdown fences, formatted as:
 [
-  {"dish": "Dish Name", "category": "Category", "icon": "🍲", "role": "${lang === 'fa' ? 'خورشت اصلی' : 'Main Stew'}"},
-  {"dish": "Rice Dish", "category": "Rice", "icon": "🍚", "role": "${lang === 'fa' ? 'پلو' : 'Rice Foundation'}"},
-  {"dish": "Appetizer", "category": "Appetizer", "icon": "🧆", "role": "${lang === 'fa' ? 'پیش‌غذا' : 'Starter'}"},
-  {"dish": "Side Salad", "category": "Salad", "icon": "🥗", "role": "${lang === 'fa' ? 'چاشنی مصلح' : 'Cooling Side'}"},
-  {"dish": "Dessert/Drink", "category": "Dessert", "icon": "🍮", "role": "${lang === 'fa' ? 'دسر سنتی' : 'Sweet Finish'}"}
+  {"dish": "Dish Name", "category": "Category", "icon": "🍲", "role": "${lang === 'fa' ? 'انتخاب اول' : 'Course 1'}"},
+  {"dish": "Dish Name 2", "category": "Category", "icon": "🍚", "role": "${lang === 'fa' ? 'انتخاب دوم' : 'Course 2'}"},
+  {"dish": "Dish Name 3", "category": "Category", "icon": "🧆", "role": "${lang === 'fa' ? 'انتخاب سوم' : 'Course 3'}"},
+  {"dish": "Dish Name 4", "category": "Category", "icon": "🥗", "role": "${lang === 'fa' ? 'انتخاب چهارم' : 'Course 4'}"},
+  {"dish": "Dish Name 5", "category": "Category", "icon": "🍮", "role": "${lang === 'fa' ? 'انتخاب پنجم' : 'Course 5'}"}
 ]`;
     }
 
@@ -1419,11 +1235,11 @@ Respond ONLY with a valid JSON array of 5 objects with no markdown fences, forma
       }, 200);
     } catch (err: any) {
       setSuggestedCircles([
-        { dish: `${selectedCuisine} Saffron Specialty`, category: 'Fusion', icon: '🍲', role: 'Main Entree' },
-        { dish: 'Crispy Tahdig Rice Base', category: 'Fusion', icon: '🍚', role: 'Rice Foundation' },
-        { dish: 'Persian Spiced Starter', category: 'Fusion', icon: '🥪', role: 'Appetizer' },
-        { dish: 'Herb & Citrus Slaw', category: 'Fusion', icon: '🥗', role: 'Side Salad' },
-        { dish: 'Rosewater Sweet Finish', category: 'Fusion', icon: '🍨', role: 'Dessert' },
+        { dish: `${selectedCuisine} Saffron Specialty`, category: 'Fusion', icon: '🍲', role: 'Specialty 1' },
+        { dish: 'Crispy Tahdig Base', category: 'Fusion', icon: '🍚', role: 'Specialty 2' },
+        { dish: 'Persian Spiced Starter', category: 'Fusion', icon: '🥪', role: 'Specialty 3' },
+        { dish: 'Citrus Herb Slaw', category: 'Fusion', icon: '🥗', role: 'Specialty 4' },
+        { dish: 'Rosewater Sweet Finish', category: 'Fusion', icon: '🍨', role: 'Specialty 5' },
       ]);
     } finally {
       setButlerSuggestLoading(false);
@@ -1479,18 +1295,8 @@ Follow the required tags and 4-part skeleton:
     }
   };
 
-  const handleQuickSurpriseDish = () => {
-    const allCategories = OUTER_CATEGORIES.concat(INNER_CATEGORIES);
-    const randomCategory = allCategories[Math.floor(Math.random() * allCategories.length)];
-    const dishList = lang === 'fa' ? randomCategory.dishesFa : randomCategory.dishesEn;
-    const randomDish = dishList[Math.floor(Math.random() * dishList.length)];
-    
-    setSelectedCategory(randomCategory);
-    handleSelectDish(randomDish, randomCategory.titleEn, true);
-  };
-
   const handleTimeOfDayClick = () => {
-    const foundCat = OUTER_CATEGORIES.concat(INNER_CATEGORIES).find((c) => c.id === timeMeal.catId) || OUTER_CATEGORIES[0];
+    const foundCat = ALL_CATEGORIES.find((c) => c.id === timeMeal.catId) || ALL_CATEGORIES[0];
     const dish = lang === 'fa' ? timeMeal.dishFa : timeMeal.dishEn;
     setSelectedCategory(foundCat);
     handleSelectDish(dish, foundCat.titleEn, true);
@@ -1580,18 +1386,24 @@ Follow the required tags and 4-part skeleton:
 
   const isRTL = lang === 'fa';
 
+  const spinInterpolation = spinAnim.interpolate({
+    inputRange: [0, 7],
+    outputRange: ['0deg', '2520deg'],
+  });
+
   return (
-    <View style={[styles.rootContainer, { paddingTop: Math.max(insets.top, 18) }]}>
+    <View style={[styles.rootContainer, { paddingTop: Math.max(insets.top, 14) }]}>
       <View style={[styles.outerFrame, styles.mainFrame]}>
         {/* HEADER */}
         <View style={styles.modernHeader}>
           <View>
             <Text style={styles.modernHeaderTitle}>سفره ایرانی</Text>
             <Text style={styles.modernHeaderSub}>
-              {activeTab === 'home' && (lang === 'fa' ? 'خوش آمدید' : 'Persian Culinary Masterclass')}
-              {activeTab === 'search' && (lang === 'fa' ? 'جستجو' : 'Search')}
-              {activeTab === 'wheel' && (lang === 'fa' ? 'گردونه سفره' : 'The Dial')}
-              {activeTab === 'profile' && (lang === 'fa' ? 'پروفایل' : 'Profile')}
+              {activeTab === 'home' && (lang === 'fa' ? 'سفره‌خانه سنتی و منوی رستورانی' : 'Royal Dining & Restaurant Menu')}
+              {activeTab === 'search' && (lang === 'fa' ? 'جستجوی هوشمند غذاها' : 'Search Culinary Catalog')}
+              {activeTab === 'wheel' && (lang === 'fa' ? 'گردونه سنتی سفره' : 'Concentric Persian Dial')}
+              {activeTab === 'butler' && (lang === 'fa' ? 'میزبان درباری' : 'The Royal Dining Butler')}
+              {activeTab === 'profile' && (lang === 'fa' ? 'پروفایل و کتابچه آشپزی' : 'My Kitchen & Profile')}
             </Text>
           </View>
           <View style={styles.langPillContainer}>
@@ -1610,29 +1422,280 @@ Follow the required tags and 4-part skeleton:
           </View>
         </View>
 
-        {/* INSTANT REAL-TIME SEARCH BAR */}
+        {/* SEARCH BAR (WHEN SEARCH TAB ACTIVE) */}
         {activeTab === 'search' && (
-        <View style={styles.searchBarContainer}>
-          <Text style={styles.searchIcon}>🔍</Text>
-          <TextInput
-            ref={searchInputRef}
-            style={[styles.searchInput, isRTL && { textAlign: 'right' }]}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            placeholder={lang === 'fa' ? 'جستجوی غذا یا خورشت (مثال: فسنجان، ته‌چین...)' : 'Search any recipe or stew (e.g. Fesenjan, Tahchin...)'}
-            placeholderTextColor="#94a3b8"
-            clearButtonMode="while-editing"
-          />
-          {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.searchClearBtn}>
-              <Text style={styles.searchClearText}>✕</Text>
-            </TouchableOpacity>
-          )}
-        </View>
+          <View style={styles.searchBarContainer}>
+            <Text style={styles.searchIcon}>🔍</Text>
+            <TextInput
+              ref={searchInputRef}
+              style={[styles.searchInput, isRTL && { textAlign: 'right' }]}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholder={lang === 'fa' ? 'جستجوی غذا یا خورشت (مثال: فسنجان، ته‌چین...)' : 'Search any recipe or stew (e.g. Fesenjan, Tahchin...)'}
+              placeholderTextColor="#94a3b8"
+              clearButtonMode="while-editing"
+            />
+            {searchQuery.length > 0 && (
+              <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.searchClearBtn}>
+                <Text style={styles.searchClearText}>✕</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         )}
 
-        {/* CONDITIONAL RENDER PER ACTIVE TAB */}
-        {activeTab === 'search' ? (
+        {/* TAB 1: HOME (RESTAURANT MENU BOOK STYLE WITH GOLD FRAMES) */}
+        {activeTab === 'home' ? (
+          <ScrollView style={{ flex: 1, width: '100%' }} contentContainerStyle={styles.homeScrollContent} showsVerticalScrollIndicator={false}>
+            {/* Crown Hero Dish */}
+            <TouchableOpacity style={styles.heroCard} activeOpacity={0.9} onPress={handleTimeOfDayClick}>
+              <Text style={styles.heroEyebrow}>{lang === 'fa' ? timeMeal.labelFa : timeMeal.labelEn}</Text>
+              <Text style={styles.heroTitle}>{lang === 'fa' ? timeMeal.dishFa : timeMeal.dishEn}</Text>
+              <View style={styles.heroFooterRow}>
+                <Text style={styles.heroIcon}>{timeMeal.icon}</Text>
+                <View style={styles.heroCta}>
+                  <Text style={styles.heroCtaText}>{lang === 'fa' ? 'دستور پخت ‹' : 'Cook this ‹'}</Text>
+                </View>
+              </View>
+            </TouchableOpacity>
+
+            {/* Quick Action Navigation Buttons */}
+            <View style={styles.quickRow}>
+              <TouchableOpacity
+                style={styles.quickCard}
+                activeOpacity={0.85}
+                onPress={() => {
+                  setActiveTab('wheel');
+                  setShowSurpriseModal(true);
+                }}
+              >
+                <Text style={styles.quickIcon}>🎲</Text>
+                <Text style={styles.quickTitle}>{lang === 'fa' ? 'چی بپزم؟ (شانس)' : 'Surprise Me'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.quickCard} activeOpacity={0.85} onPress={() => setShowRegionalModal(true)}>
+                <Text style={styles.quickIcon}>📍</Text>
+                <Text style={styles.quickTitle}>{lang === 'fa' ? 'غذاهای استانی' : 'Regional'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.quickCard} activeOpacity={0.85} onPress={() => setShowTemperamentInfo(true)}>
+                <Text style={styles.quickIcon}>⚖️</Text>
+                <Text style={styles.quickTitle}>{lang === 'fa' ? 'طبع و مزاج' : 'Temperament'}</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* RESTAURANT MENU FOLIO BOOK */}
+            <Text style={styles.menuBookMainHeading}>
+              {lang === 'fa' ? '📖 منوی تشریفاتی رستوران' : '📖 Restaurant Menu Folio'}
+            </Text>
+
+            {COURSE_BUCKETS.filter((b) => b.id !== 'all').map((bucket) => {
+              const bucketCategories = ALL_CATEGORIES.filter((c) => c.bucket === bucket.id);
+              return (
+                <View key={bucket.id} style={styles.menuFolioCard}>
+                  {/* Gold Course Frame Header */}
+                  <View style={styles.menuFolioHeaderRow}>
+                    <Text style={styles.menuFolioIcon}>{bucket.icon}</Text>
+                    <View style={{ flex: 1, paddingHorizontal: 8 }}>
+                      <Text style={styles.menuFolioTitle}>
+                        {lang === 'fa' ? bucket.titleFa : bucket.titleEn}
+                      </Text>
+                      <Text style={styles.menuFolioSubtitle}>
+                        {lang === 'fa' ? bucket.subtitleFa : bucket.subtitleEn}
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      style={styles.menuFolioOpenDialBtn}
+                      onPress={() => {
+                        setSelectedBucket(bucket.id);
+                        setActiveTab('wheel');
+                      }}
+                    >
+                      <Text style={styles.menuFolioOpenDialText}>
+                        {lang === 'fa' ? 'گردونه ‹' : 'Dial ‹'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  <View style={styles.menuFolioGoldDivider} />
+
+                  <View style={styles.menuFolioGrid}>
+                    {bucketCategories.map((cat) => (
+                      <View key={cat.id} style={styles.menuFolioCategoryBox}>
+                        <TouchableOpacity
+                          style={styles.menuFolioCategoryHeader}
+                          activeOpacity={0.8}
+                          onPress={() => {
+                            setSelectedCategory(cat);
+                            setSubModalMode('dial');
+                          }}
+                        >
+                          <Text style={styles.menuFolioCatIcon}>{cat.icon}</Text>
+                          <Text style={styles.menuFolioCatTitle}>
+                            {(lang === 'fa' ? cat.titleFa : cat.titleEn).replace('\n', ' ')}
+                          </Text>
+                          <Text style={styles.menuFolioCatArrow}>›</Text>
+                        </TouchableOpacity>
+
+                        <View style={styles.menuFolioDishesPillsRow}>
+                          {(lang === 'fa' ? cat.dishesFa : cat.dishesEn).slice(0, 3).map((dishName, dIdx) => (
+                            <TouchableOpacity
+                              key={dIdx}
+                              style={styles.menuFolioDishPill}
+                              onPress={() => {
+                                setSelectedCategory(cat);
+                                handleSelectDish(dishName, cat.titleEn, true);
+                              }}
+                            >
+                              <Text style={styles.menuFolioDishPillText} numberOfLines={1}>
+                                {dishName}
+                              </Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              );
+            })}
+          </ScrollView>
+        ) : activeTab === 'wheel' ? (
+          /* TAB 2: DIAL */
+          <View style={{ flex: 1, width: '100%', justifyContent: 'space-between', alignItems: 'center' }}>
+            <View style={{ width: '100%', alignItems: 'center' }}>
+              <View style={[styles.cornerLogoBadge, styles.centeredLogoBadge, { width: dial.badgeW * 1.3, height: dial.badgeH * 1.1 }]}>
+                <Image
+                  source={require('./assets/moghimi_logo.jpg')}
+                  style={styles.cornerLogoImage}
+                  resizeMode="contain"
+                />
+              </View>
+
+              {/* Gold Course Bucket Selector */}
+              <View style={styles.courseBucketBarWrapper}>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.courseBucketScroll}>
+                  {COURSE_BUCKETS.map((b) => {
+                    const isActive = selectedBucket === b.id;
+                    return (
+                      <TouchableOpacity
+                        key={b.id}
+                        style={[styles.courseBucketPill, isActive && styles.courseBucketPillActive]}
+                        onPress={() => setSelectedBucket(b.id)}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={styles.courseBucketIcon}>{b.icon}</Text>
+                        <Text style={[styles.courseBucketText, isActive && styles.courseBucketTextActive]}>
+                          {lang === 'fa' ? b.titleFa : b.titleEn}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+            </View>
+
+            {/* Rotating Wheel Viewport */}
+            <View style={[styles.dialViewport, { width: dial.size, height: dial.size }, { marginVertical: 2, alignSelf: 'center' }]}>
+              <Animated.View style={[styles.dialContainer, { width: dial.size, height: dial.size }, { transform: [{ rotate: spinInterpolation }] }]}>
+                <ImageBackground
+                  source={require('./assets/persian_wheel.jpg')}
+                  style={[styles.wheelBackground, { width: dial.size, height: dial.size }]}
+                  imageStyle={[styles.wheelImageStyle, { borderRadius: dial.size / 2 }]}
+                >
+                  <View style={[styles.centerMedallionContainer, circleBox(dial.medallion)]}>
+                    <Image
+                      source={require('./assets/iran_map.jpg')}
+                      style={styles.centerMedallionImage}
+                      resizeMode="cover"
+                    />
+                  </View>
+
+                  {/* Adaptive Category Circles */}
+                  {displayedCategories.map((cat, index) => {
+                    const total = displayedCategories.length;
+                    const stepAngle = 360 / total;
+                    const angle = (index * stepAngle - 90) * (Math.PI / 180);
+                    const isMagnified = magnifiedId === cat.id;
+                    const isSpinLightActive = isSpinning && spinLightIndex === index;
+
+                    const circleDiameter = total <= 4 ? 76 : total <= 7 ? 68 : 50;
+                    const ringRadius = dial.size / 2 - (total <= 7 ? 42 : 34);
+
+                    const x = dial.center + ringRadius * Math.cos(angle) - circleDiameter / 2;
+                    const y = dial.center + ringRadius * Math.sin(angle) - circleDiameter / 2;
+
+                    return (
+                      <TouchableOpacity
+                        key={cat.id}
+                        style={[
+                          styles.bucketCircle,
+                          {
+                            left: x,
+                            top: y,
+                            width: circleDiameter,
+                            height: circleDiameter,
+                            borderRadius: circleDiameter / 2,
+                          },
+                          isMagnified && styles.circleMagnifiedLarge,
+                          isSpinLightActive && styles.circleSpinLightGlowing,
+                        ]}
+                        activeOpacity={0.9}
+                        delayLongPress={200}
+                        onPressIn={() => !isSpinning && setMagnifiedId(cat.id)}
+                        onPressOut={() => setMagnifiedId(null)}
+                        onPress={() => {
+                          if (isSpinning) return;
+                          setMagnifiedId(null);
+                          setSelectedCategory(cat);
+                          setSubModalMode('dial');
+                        }}
+                      >
+                        <Text style={[styles.bucketCircleIcon, { fontSize: total <= 7 ? 20 : 15 }]}>
+                          {isSpinLightActive ? '✨' : cat.icon}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.bucketCircleLabel,
+                            { fontSize: total <= 4 ? 11 : total <= 7 ? 9.5 : 7.5 },
+                            isMagnified && styles.labelMagnified,
+                          ]}
+                          numberOfLines={2}
+                        >
+                          {lang === 'fa' ? cat.titleFa : cat.titleEn}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ImageBackground>
+              </Animated.View>
+            </View>
+
+            {/* Bottom Action Area: Compact "Surprise Me" Button */}
+            <View style={{ width: '100%', alignItems: 'center', marginBottom: 4 }}>
+              <View style={styles.wheelBottomActionRow}>
+                <TouchableOpacity
+                  style={[styles.compactSurpriseBtn, isSpinning && styles.compactSurpriseBtnSpinning]}
+                  onPress={() => setShowSurpriseModal(true)}
+                  disabled={isSpinning}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.compactSurpriseIcon}>{isSpinning ? '⏳' : '🎲'}</Text>
+                  <Text style={styles.compactSurpriseText}>
+                    {isSpinning
+                      ? (lang === 'fa' ? 'در حال چرخش...' : 'Spinning...')
+                      : (lang === 'fa' ? 'پیشنهاد تصادفی (چی بپزم؟)' : 'Surprise Me')}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity style={styles.bottomGuidePill} onPress={() => setShowUserGuide(true)} activeOpacity={0.85}>
+                <Text style={styles.bottomGuideIcon}>📘</Text>
+                <Text style={styles.bottomGuideText}>
+                  {lang === 'fa' ? 'راهنمای استفاده و امکانات' : 'User Guide & Features'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : activeTab === 'search' ? (
+          /* TAB 3: SEARCH */
           <View style={styles.searchResultsWrapper}>
             <View style={styles.searchResultsHeaderRow}>
               <Text style={styles.searchResultsCountText}>
@@ -1678,157 +1741,8 @@ Follow the required tags and 4-part skeleton:
               )}
             </ScrollView>
           </View>
-        ) : activeTab === 'wheel' ? (
-          <View style={{ flex: 1, width: '100%', justifyContent: 'center', alignItems: 'center' }}>
-            <View style={[styles.cornerLogoBadge, styles.centeredLogoBadge, { width: dial.badgeW * 1.4, height: dial.badgeH * 1.4 }]}>
-              <Image
-                source={require('./assets/moghimi_logo.jpg')}
-                style={styles.cornerLogoImage}
-                resizeMode="contain"
-              />
-            </View>
-
-            <View style={[styles.dialViewport, wheelStyles.viewport, { marginVertical: 4, alignSelf: 'center' }]}>
-              {/* Concentric Persian Miniature Dial */}
-              <View style={[styles.dialContainer, wheelStyles.container]}>
-                <ImageBackground
-                  source={require('./assets/persian_wheel.jpg')}
-                  style={[styles.wheelBackground, wheelStyles.background]}
-                  imageStyle={[styles.wheelImageStyle, wheelStyles.image]}
-                >
-                  {/* CENTER MEDALLION: IRAN MAP COVERS ENTIRE CIRCLE */}
-                  <View style={[styles.centerMedallionContainer, wheelStyles.medallion]}>
-                    <Image
-                      source={require('./assets/iran_map.jpg')}
-                      style={styles.centerMedallionImage}
-                      resizeMode="cover"
-                    />
-                  </View>
-
-                  {/* OUTER RING */}
-                  {OUTER_CATEGORIES.map((cat, index) => {
-                    const stepAngle = 360 / OUTER_CATEGORIES.length;
-                    const angle = (index * stepAngle - 90) * (Math.PI / 180);
-                    const isMagnified = magnifiedId === cat.id;
-                    const circleDiameter = dial.outerDiameter;
-                    const x = dial.center + dial.outerRadius * Math.cos(angle) - circleDiameter / 2;
-                    const y = dial.center + dial.outerRadius * Math.sin(angle) - circleDiameter / 2;
-
-                    return (
-                      <TouchableOpacity
-                        key={cat.id}
-                        style={[styles.outerCircle, circleBox(circleDiameter), { left: x, top: y }, isMagnified && styles.circleMagnified]}
-                        activeOpacity={0.9}
-                        delayLongPress={200}
-                        onPressIn={() => setMagnifiedId(cat.id)}
-                        onPressOut={() => setMagnifiedId(null)}
-                        onPress={() => {
-                          setMagnifiedId(null);
-                          setSelectedCategory(cat);
-                          setSubModalMode('dial');
-                        }}
-                      >
-                        <Text style={[styles.outerIcon, isMagnified && styles.iconMagnified]}>{cat.icon}</Text>
-                        <Text style={[styles.outerLabel, isMagnified && styles.labelMagnified]} numberOfLines={2}>
-                          {lang === 'fa' ? cat.titleFa : cat.titleEn}
-                        </Text>
-                        {isMagnified && <Text style={styles.persianMagnified}>{cat.persian}</Text>}
-                      </TouchableOpacity>
-                    );
-                  })}
-
-                  {/* INNER RING */}
-                  {INNER_CATEGORIES.map((cat, index) => {
-                    const stepAngle = 360 / INNER_CATEGORIES.length;
-                    const angle = (index * stepAngle - 90) * (Math.PI / 180);
-                    const isMagnified = magnifiedId === cat.id;
-                    const circleDiameter = dial.innerDiameter;
-                    const x = dial.center + dial.innerRadius * Math.cos(angle) - circleDiameter / 2;
-                    const y = dial.center + dial.innerRadius * Math.sin(angle) - circleDiameter / 2;
-
-                    return (
-                      <TouchableOpacity
-                        key={cat.id}
-                        style={[styles.innerCircle, circleBox(circleDiameter), { left: x, top: y }, isMagnified && styles.circleMagnifiedInner]}
-                        activeOpacity={0.9}
-                        delayLongPress={200}
-                        onPressIn={() => setMagnifiedId(cat.id)}
-                        onPressOut={() => setMagnifiedId(null)}
-                        onPress={() => {
-                          setMagnifiedId(null);
-                          setSelectedCategory(cat);
-                          setSubModalMode('dial');
-                        }}
-                      >
-                        <Text style={[styles.innerIcon, isMagnified && styles.iconMagnified]}>{cat.icon}</Text>
-                        <Text style={[styles.innerLabel, isMagnified && styles.labelMagnified]} numberOfLines={2}>
-                          {lang === 'fa' ? cat.titleFa : cat.titleEn}
-                        </Text>
-                        {isMagnified && <Text style={styles.persianMagnified}>{cat.persian}</Text>}
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ImageBackground>
-              </View>
-            </View>
-
-            {/* BOTTOM CENTER: USER GUIDE PILL BUTTON */}
-            <TouchableOpacity style={styles.bottomGuidePill} onPress={() => setShowUserGuide(true)} activeOpacity={0.85}>
-              <Text style={styles.bottomGuideIcon}>📘</Text>
-              <Text style={styles.bottomGuideText}>
-                {lang === 'fa' ? 'راهنمای استفاده و امکانات' : 'User Guide & Features'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        ) : activeTab === 'home' ? (
-          <ScrollView style={{ flex: 1, width: '100%' }} contentContainerStyle={styles.homeScrollContent} showsVerticalScrollIndicator={false}>
-            <TouchableOpacity style={styles.heroCard} activeOpacity={0.9} onPress={handleTimeOfDayClick}>
-              <Text style={styles.heroEyebrow}>{lang === 'fa' ? timeMeal.labelFa : timeMeal.labelEn}</Text>
-              <Text style={styles.heroTitle}>{lang === 'fa' ? timeMeal.dishFa : timeMeal.dishEn}</Text>
-              <View style={styles.heroFooterRow}>
-                <Text style={styles.heroIcon}>{timeMeal.icon}</Text>
-                <View style={styles.heroCta}>
-                  <Text style={styles.heroCtaText}>{lang === 'fa' ? 'دستور پخت' : 'Cook this'}</Text>
-                </View>
-              </View>
-            </TouchableOpacity>
-
-            <View style={styles.quickRow}>
-              <TouchableOpacity style={styles.quickCard} activeOpacity={0.85} onPress={handleQuickSurpriseDish}>
-                <Text style={styles.quickIcon}>🎲</Text>
-                <Text style={styles.quickTitle}>{lang === 'fa' ? 'چی بپزم؟' : 'Surprise me'}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.quickCard} activeOpacity={0.85} onPress={() => setShowRegionalModal(true)}>
-                <Text style={styles.quickIcon}>📍</Text>
-                <Text style={styles.quickTitle}>{lang === 'fa' ? 'غذاهای استانی' : 'Regional'}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.quickCard} activeOpacity={0.85} onPress={() => setShowTemperamentInfo(true)}>
-                <Text style={styles.quickIcon}>⚖️</Text>
-                <Text style={styles.quickTitle}>{lang === 'fa' ? 'طبع و مزاج' : 'Temperament'}</Text>
-              </TouchableOpacity>
-            </View>
-
-            <Text style={styles.sectionHeading}>{lang === 'fa' ? 'دسته‌بندی‌ها' : 'Browse categories'}</Text>
-            <View style={styles.categoryGrid}>
-              {OUTER_CATEGORIES.concat(INNER_CATEGORIES).map((cat) => (
-                <TouchableOpacity
-                  key={cat.id}
-                  style={styles.categoryTile}
-                  activeOpacity={0.85}
-                  onPress={() => {
-                    setSelectedCategory(cat);
-                    setSubModalMode('dial');
-                  }}
-                >
-                  <Text style={styles.categoryTileIcon}>{cat.icon}</Text>
-                  <Text style={styles.categoryTileTitle} numberOfLines={2}>
-                    {(lang === 'fa' ? cat.titleFa : cat.titleEn).replace('\n', ' ')}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </ScrollView>
         ) : activeTab === 'profile' ? (
+          /* TAB 5: PROFILE */
           <ScrollView style={{ flex: 1, width: '100%' }} contentContainerStyle={styles.homeScrollContent} showsVerticalScrollIndicator={false}>
             <View style={styles.profileHeader}>
               <View style={styles.profileAvatar}>
@@ -1857,14 +1771,6 @@ Follow the required tags and 4-part skeleton:
             </TouchableOpacity>
           </ScrollView>
         ) : null}
-
-        {activeTab === 'wheel' && (
-          <Text style={styles.footerInstruction}>
-            {lang === 'fa'
-              ? 'برای مطالعه بهتر انگشت را نگه‌دارید • برای ورود به منو ضربه بزنید'
-              : 'Hold finger on circle to magnify • Tap item to view dishes'}
-          </Text>
-        )}
       </View>
 
       {/* BOTTOM TAB BAR */}
@@ -1911,6 +1817,293 @@ Follow the required tags and 4-part skeleton:
         })}
       </View>
 
+      {/* SURPRISE ME COURSE SELECTION MODAL (FOREGROUND SELECTION OVER BACKGROUND WHEEL) */}
+      <Modal visible={showSurpriseModal} animationType="fade" transparent={true} onRequestClose={() => setShowSurpriseModal(false)}>
+        <View style={styles.surpriseOverlay}>
+          <View style={styles.surpriseCourseCard}>
+            <View style={styles.surpriseCourseHeader}>
+              <Text style={{ fontSize: 26 }}>🎲</Text>
+              <View style={{ flex: 1, paddingHorizontal: 10 }}>
+                <Text style={styles.surpriseCourseTitle}>{lang === 'fa' ? 'انتخاب دوره غذایی برای شانس' : 'Select Course to Spin'}</Text>
+                <Text style={styles.surpriseCourseSubtitle}>{lang === 'fa' ? 'برای کدام وعده شانس گردونه را امتحان می‌کنید؟' : 'Which course should the wheel pick from?'}</Text>
+              </View>
+              <TouchableOpacity onPress={() => setShowSurpriseModal(false)} style={styles.closeBadge}>
+                <Text style={styles.closeBadgeText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.surprisePillList}>
+              {COURSE_BUCKETS.map((course) => (
+                <TouchableOpacity
+                  key={course.id}
+                  style={styles.surpriseCourseButton}
+                  onPress={() => triggerWheelSpinForCourse(course.id)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.surpriseCourseBtnIcon}>{course.icon}</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.surpriseCourseBtnText}>{lang === 'fa' ? course.titleFa : course.titleEn}</Text>
+                    <Text style={styles.surpriseCourseBtnSub}>{lang === 'fa' ? course.subtitleFa : course.subtitleEn}</Text>
+                  </View>
+                  <Text style={styles.surpriseCourseBtnArrow}>‹</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* POST-SPIN CONFIRMATION MODAL (ASK YES / NO) */}
+      <Modal visible={spinResultDish !== null} animationType="fade" transparent={true} onRequestClose={() => setSpinResultDish(null)}>
+        <View style={styles.surpriseOverlay}>
+          <View style={styles.spinConfirmationCard}>
+            <Text style={styles.spinConfirmationIcon}>✨🍲✨</Text>
+            <Text style={styles.spinConfirmationHeading}>{lang === 'fa' ? 'گردونه این غذا را پیشنهاد داد:' : 'The Wheel Landed On:'}</Text>
+            <Text style={styles.spinConfirmationDish}>{spinResultDish?.dish}</Text>
+            <Text style={styles.spinConfirmationCategory}>
+              {lang === 'fa' ? `از دسته ${spinResultDish?.category.titleFa}` : `Category: ${spinResultDish?.category.titleEn}`}
+            </Text>
+
+            <Text style={styles.spinConfirmationQuestion}>
+              {lang === 'fa' ? 'آیا مایلید دستور پخت این غذا آماده شود؟' : 'Would you like to prepare this recipe?'}
+            </Text>
+
+            <View style={styles.spinConfirmationButtonRow}>
+              <TouchableOpacity
+                style={styles.spinConfirmNoBtn}
+                onPress={() => {
+                  setSpinResultDish(null);
+                  setShowSurpriseModal(true);
+                }}
+              >
+                <Text style={styles.spinConfirmNoText}>{lang === 'fa' ? 'خیر، چرخش دوباره' : 'No, Spin Again'}</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.spinConfirmYesBtn}
+                onPress={() => {
+                  if (spinResultDish) {
+                    const dishToCook = spinResultDish.dish;
+                    const catToCook = spinResultDish.category;
+                    setSpinResultDish(null);
+                    setSelectedCategory(catToCook);
+                    handleSelectDish(dishToCook, catToCook.titleEn, true);
+                  }
+                }}
+              >
+                <Text style={styles.spinConfirmYesText}>{lang === 'fa' ? 'بله، پخت این غذا' : 'Yes, Cook This!'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* BUTLER TAB CONTENT */}
+      {activeTab === 'butler' && (
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={[styles.butlerTabContainer, { paddingTop: Math.max(insets.top, 18) + 4, bottom: tabBarHeight + TAB_CENTER_OVERHANG }]}
+        >
+          <View style={[styles.butlerCard, styles.butlerCardTab]}>
+            <View style={styles.heritageHeaderRow}>
+              <Text style={styles.heritageIconLarge}>🤵</Text>
+              <View style={{ flex: 1, marginLeft: 10 }}>
+                <Text style={styles.heritageModalTitle}>
+                  {lang === 'fa' ? 'میزبان درباری (Persian Butler)' : 'Persian Dining Butler (میزبان)'}
+                </Text>
+                <Text style={styles.heritageModalPersian}>
+                  {selectedBucket === 'all'
+                    ? (lang === 'fa' ? 'طراحی متناسب ضیافت بر اساس تعداد نفرات و رژیم غذایی' : 'Banquet curation & dietary tailoring')
+                    : (lang === 'fa' ? `طراحی متمرکز بر دسته: ${COURSE_BUCKETS.find((b) => b.id === selectedBucket)?.titleFa}` : `Focused on Course: ${COURSE_BUCKETS.find((b) => b.id === selectedBucket)?.titleEn}`)}
+                </Text>
+              </View>
+
+              <View style={styles.fusionSwitchContainer}>
+                <Text style={styles.fusionSwitchLabel}>
+                  {lang === 'fa' ? 'فیوژن' : 'Fusion'}
+                </Text>
+                <Switch
+                  value={isFusionEnabled}
+                  onValueChange={(val) => {
+                    setIsFusionEnabled(val);
+                    if (val) {
+                      Alert.alert(
+                        lang === 'fa' ? 'حالت فیوژن فعال شد' : 'Fusion Mode Activated',
+                        lang === 'fa' 
+                          ? 'کشور مورد نظر خود را انتخاب فرمایید تا منوی ترکیبی ویژه آماده گردد.'
+                          : 'Select your desired culture to tailor an innovative fusion banquet.'
+                      );
+                    }
+                  }}
+                  trackColor={{ false: '#334155', true: '#c59b27' }}
+                  thumbColor={isFusionEnabled ? '#f6d860' : '#94a3b8'}
+                />
+              </View>
+            </View>
+
+            <View style={styles.butlerBucketIndicator}>
+              <Text style={styles.butlerBucketIndicatorText}>
+                {lang === 'fa'
+                  ? `منوی فعال: ${COURSE_BUCKETS.find((b) => b.id === selectedBucket)?.titleFa}`
+                  : `Active Course: ${COURSE_BUCKETS.find((b) => b.id === selectedBucket)?.titleEn}`}
+              </Text>
+            </View>
+
+            <ScrollView ref={butlerScrollRef} style={{ flex: 1, marginVertical: 6 }} showsVerticalScrollIndicator={true} keyboardShouldPersistTaps="handled">
+              {isFusionEnabled && (
+                <View style={styles.cuisineSelectorCard}>
+                  <Text style={styles.cuisineSelectorHeading}>
+                    {lang === 'fa' ? 'کشور مقصد جهت ترکیب با سبک اصیل ایرانی:' : 'Select Target Fusion Cuisine:'}
+                  </Text>
+                  <View style={styles.cuisinePillsRow}>
+                    {(['American', 'Japanese', 'Chinese', 'Mexican'] as FusionCuisine[]).map((c) => {
+                      const active = selectedCuisine === c;
+                      const icons: Record<FusionCuisine, string> = {
+                        American: '🇺🇸 American',
+                        Japanese: '🇯🇵 Japanese',
+                        Chinese: '🇨🇳 Chinese',
+                        Mexican: '🇲🇽 Mexican',
+                      };
+                      const iconsFa: Record<FusionCuisine, string> = {
+                        American: '🇺🇸 آمریکایی',
+                        Japanese: '🇯🇵 ژاپنی',
+                        Chinese: '🇨🇳 چینی',
+                        Mexican: '🇲🇽 مکزیکی',
+                      };
+                      return (
+                        <TouchableOpacity
+                          key={c}
+                          style={[styles.cuisinePill, active && styles.cuisinePillActive]}
+                          onPress={() => setSelectedCuisine(c)}
+                        >
+                          <Text style={[styles.cuisinePillText, active && styles.cuisinePillTextActive]}>
+                            {lang === 'fa' ? iconsFa[c] : icons[c]}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
+              )}
+
+              <Text style={styles.butlerQuestionLabel}>{lang === 'fa' ? 'چند نفر مهمان دارید؟' : 'How many guests will be dining?'}</Text>
+              <TextInput
+                style={[styles.butlerInput, isRTL && { textAlign: 'right' }]}
+                keyboardType="numeric"
+                value={guestCount}
+                onChangeText={setGuestCount}
+                placeholder="e.g. 4, 8, 12"
+                placeholderTextColor="#94a3b8"
+              />
+
+              <Text style={styles.butlerQuestionLabel}>{lang === 'fa' ? 'آیا حساسیت غذایی یا رژیم خاصی دارید؟' : 'Any food allergies or dietary restrictions?'}</Text>
+              <TextInput
+                style={[styles.butlerInput, isRTL && { textAlign: 'right' }]}
+                value={allergiesInput}
+                onChangeText={setAllergiesInput}
+                placeholder={lang === 'fa' ? 'مثال: بدون گردو، بدون گلوتن، گیاهی، کم‌نمک' : 'e.g. Walnut allergy, Gluten-free, Vegetarian, Low sodium'}
+                placeholderTextColor="#94a3b8"
+              />
+
+              <Text style={styles.butlerQuestionLabel}>{lang === 'fa' ? 'طعم یا ذائقه خاصی مد نظر دارید؟' : 'Flavor preferences or special requests?'}</Text>
+              <TextInput
+                style={[styles.butlerInput, isRTL && { textAlign: 'right' }]}
+                value={specialPreferences}
+                onChangeText={setSpecialPreferences}
+                placeholder={lang === 'fa' ? 'مثال: پر زعفران، ترش با رب انار، ته‌دیگ ترد' : 'e.g. Extra saffron, sour pomegranate focus, crispy Tahdig'}
+                placeholderTextColor="#94a3b8"
+              />
+
+              <TouchableOpacity style={styles.butlerSubmitBtn} onPress={handleConsultButler} disabled={butlerSuggestLoading}>
+                <Text style={styles.butlerSubmitBtnText}>
+                  {butlerSuggestLoading 
+                    ? (lang === 'fa' ? 'در حال چینش ضیافت...' : 'Curating Menu & Proportions...') 
+                    : isFusionEnabled
+                      ? (lang === 'fa' ? `✨ طراحی ضیافت فیوژن ایرانی-${selectedCuisine}` : `✨ Curate Persian-${selectedCuisine} Fusion`)
+                      : (lang === 'fa' ? 'طراحی منوی متناسب ضیافت' : 'Curate My Banquet Menu')}
+                </Text>
+              </TouchableOpacity>
+
+              {butlerSuggestLoading && (
+                <View style={{ paddingVertical: 16, alignItems: 'center' }}>
+                  <ActivityIndicator size="small" color="#f6d860" />
+                </View>
+              )}
+
+              {suggestedCircles.length > 0 && (
+                <View style={styles.suggestedContainer}>
+                  <Text style={styles.suggestedTitle}>
+                    {isFusionEnabled
+                      ? (lang === 'fa' ? `✨ منوی فیوژن ایرانی-${selectedCuisine}:` : `✨ Persian-${selectedCuisine} Fusion Menu:`)
+                      : (lang === 'fa' ? 'پیشنهاد هماهنگ میزبان برای ضیافت:' : "Butler's Suggested Course Harmony:")}
+                  </Text>
+                  <Text style={styles.suggestedSubtext}>
+                    {lang === 'fa' ? 'جهت مشاهده مقادیر و دستور پخت کامل، هر دایره را لمس فرمایید:' : 'Tap any circular course to review its scaled recipe:'}
+                  </Text>
+
+                  <View style={styles.suggestedCirclesGrid}>
+                    {suggestedCircles.map((item) => {
+                      const isSelected = selectedButlerDish === item.dish;
+                      return (
+                        <TouchableOpacity
+                          key={item.dish}
+                          style={[styles.suggestedDishCircle, isSelected && styles.suggestedDishCircleActive]}
+                          onPress={() => handleSelectSuggestedDish(item.dish, item.role)}
+                          activeOpacity={0.8}
+                        >
+                          <Text style={styles.suggestedDishIcon}>{item.icon}</Text>
+                          <Text style={[styles.suggestedDishName, isSelected && styles.suggestedDishNameActive]} numberOfLines={2}>
+                            {item.dish}
+                          </Text>
+                          <Text style={styles.suggestedDishRole}>{item.role}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
+              )}
+
+              {butlerRecipeLoading && (
+                <View style={{ paddingVertical: 20, alignItems: 'center' }}>
+                  <ActivityIndicator size="large" color="#f6d860" />
+                  <Text style={{ color: '#f6d860', fontSize: 13, marginTop: 8, fontWeight: '700' }}>
+                    {lang === 'fa' ? 'در حال نگارش دستور پخت، زمان‌ها و فوت کوزه‌گری...' : 'Generating recipe instructions & secrets...'}
+                  </Text>
+                </View>
+              )}
+
+              {parsedButlerRecipe && !butlerRecipeLoading && (
+                <View style={styles.butlerResponseBox}>
+                  <View style={styles.recipeTitleRow}>
+                    <Text style={styles.butlerResponseTitle}>{selectedButlerDish}</Text>
+                    <View style={styles.actionButtonRow}>
+                      <TouchableOpacity style={styles.shareBtn} onPress={() => handleExportPDF(selectedButlerDish || 'Banquet Recipe', butlerRecipeText)}>
+                        <Text style={styles.shareBtnText}>📄 PDF</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.saveRecipeBtn} onPress={() => handleSaveToCookbook(selectedButlerDish || 'Banquet Recipe', butlerRecipeText)}>
+                        <Text style={styles.saveRecipeBtnText}>💾 {lang === 'fa' ? 'ذخیره دستور' : 'Save Recipe'}</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  <RecipeTabbedDisplay
+                    parsed={parsedButlerRecipe}
+                    lang={lang}
+                    isSpeaking={isSpeaking}
+                    speakingSection={speakingSection}
+                    currentStepIndex={currentStepIndex}
+                    onSpeakSection={(secKey, text) => speakSanitizedText(text, secKey)}
+                    onStopSpeech={stopActiveSpeech}
+                    onReadStep={(idx) => handleReadStep(idx, parsedButlerRecipe)}
+                    onShowTemperament={() => setShowTemperamentInfo(true)}
+                  />
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
+      )}
+
       {/* REGIONAL CUISINE MODAL */}
       <Modal visible={showRegionalModal} animationType="slide" transparent={true} onRequestClose={() => setShowRegionalModal(false)}>
         <View style={styles.heritageModalOverlay}>
@@ -1945,7 +2138,7 @@ Follow the required tags and 4-part skeleton:
                         style={styles.regionalDishPill}
                         onPress={() => {
                           setShowRegionalModal(false);
-                          const foundCat = OUTER_CATEGORIES.concat(INNER_CATEGORIES)[0];
+                          const foundCat = ALL_CATEGORIES[0];
                           setSelectedCategory(foundCat);
                           handleSelectDish(dishName, prov.nameEn, true);
                         }}
@@ -1965,7 +2158,7 @@ Follow the required tags and 4-part skeleton:
         </View>
       </Modal>
 
-      {/* COMPREHENSIVE USER GUIDE MODAL WITH MOGHIMI LOGO EMBEDDED */}
+      {/* USER GUIDE MODAL WITH EMBEDDED LOGO */}
       <Modal visible={showUserGuide} animationType="slide" transparent={true} onRequestClose={() => setShowUserGuide(false)}>
         <View style={styles.heritageModalOverlay}>
           <View style={styles.userGuideCard}>
@@ -1984,20 +2177,20 @@ Follow the required tags and 4-part skeleton:
 
             <ScrollView style={{ maxHeight: 460, marginVertical: 10 }} showsVerticalScrollIndicator={true}>
               <View style={styles.guideSectionBox}>
-                <Text style={styles.guideSectionTitle}>1. ☸️ {lang === 'fa' ? 'گردونه سنتی سفره' : 'Interactive Dial & Magnifier'}</Text>
+                <Text style={styles.guideSectionTitle}>1. 👑 {lang === 'fa' ? 'منوی رستورانی در صفحه اصلی' : 'Restaurant Folio on Home'}</Text>
                 <Text style={[styles.guideSectionText, isRTL && styles.textRTL]}>
                   {lang === 'fa'
-                    ? 'انگشت خود را روی هر یک از دایره‌های منو نگه‌دارید تا بزرگ‌نمایی شود و به راحتی مطالعه کنید. با یک ضربه، وارد منوی کامل آن دسته می‌شوید.'
-                    : 'Hold your finger on any wheel circle to magnify text. Tap once to enter its complete dish selection.'}
+                    ? 'در تب خانه، تمام غذاها بر اساس دوره‌های رستورانی (پیش‌غذا، غذای اصلی، مخلفات، دسر، ساندویچ و نوشیدنی) در کادرهای زرین مجلل ارائه شده‌اند.'
+                    : 'The Home tab organizes dishes into royal gold-bordered banquet folio courses (Appetizers, Mains, Sides, Desserts, Snacks, Drinks).'}
                 </Text>
               </View>
 
               <View style={styles.guideSectionBox}>
-                <Text style={styles.guideSectionTitle}>2. 🔍 {lang === 'fa' ? 'جستجوی هوشمند دو زبانه' : 'Instant Multi-Lingual Search'}</Text>
+                <Text style={styles.guideSectionTitle}>2. 🎲 {lang === 'fa' ? 'پیشنهاد تصادفی (چی بپزم؟)' : 'Surprise Me Flow'}</Text>
                 <Text style={[styles.guideSectionText, isRTL && styles.textRTL]}>
                   {lang === 'fa'
-                    ? 'با تایپ نام هر غذا، خورشت یا ماده اصلی به فارسی یا انگلیسی در نوار جستجو، تمام موارد متناسب فوراً در دسترس شما قرار می‌گیرند.'
-                    : 'Type any dish, stew, or key ingredient in English or Persian to immediately find and prepare matching culinary items.'}
+                    ? 'ابتدا دوره غذایی مد نظر را انتخاب می‌کنید، سپس گردونه می‌چرخد و پس از توقف، نام غذا را نمایش داده و نظر شما را برای تهیه دستور می‌پرسد.'
+                    : 'Select a course, watch the wheel spin, and decide whether you want the recipe or prefer to spin again.'}
                 </Text>
               </View>
 
@@ -2005,17 +2198,8 @@ Follow the required tags and 4-part skeleton:
                 <Text style={styles.guideSectionTitle}>3. 📑 {lang === 'fa' ? 'تب‌بندی بخش‌های دستور پخت' : 'Segmented Recipe Tabs'}</Text>
                 <Text style={[styles.guideSectionText, isRTL && styles.textRTL]}>
                   {lang === 'fa'
-                    ? 'هر دستور پخت در ۴ تب مجزا (طبع و تاریخچه، مواد لازم، مراحل پخت، فوت کوزه‌گری) ارائه می‌شود تا دقیقاً بخش دلخواه را با دستیار صوتی مرور فرمایید.'
+                    ? 'هر دستور پخت در ۴ تب مجزا (طبع، مواد لازم، مراحل پخت، فوت کوزه‌گری) ارائه می‌شود تا دقیقاً بخش دلخواه را با دستیار صوتی مرور فرمایید.'
                     : 'Recipes open into 4 dedicated tabs (Nature, Ingredients, Steps, Secrets) allowing seamless switching and focused audio guidance.'}
-                </Text>
-              </View>
-
-              <View style={styles.guideSectionBox}>
-                <Text style={styles.guideSectionTitle}>4. 🤵 {lang === 'fa' ? 'میزبان درباری و فیوژن بین‌المللی' : 'Royal Butler & Multi-Cuisine Fusion'}</Text>
-                <Text style={[styles.guideSectionText, isRTL && styles.textRTL]}>
-                  {lang === 'fa'
-                    ? 'با انتخاب میزبان در گوشه بالا-راست، تعداد میهمانان و رژیم‌ها را مشخص فرمایید تا منوی متناسب آماده شود. همچنین می‌توانید کلید فیوژن را برای ترکیب ایرانی با سبک‌های آمریکایی، ژاپنی، چینی یا مکزیکی فعال کنید.'
-                    : 'Set guest counts and dietary restrictions in the Butler. Toggle the Fusion switch to craft creative Persian fusions with American, Japanese, Chinese, or Mexican cuisines.'}
                 </Text>
               </View>
 
@@ -2037,7 +2221,7 @@ Follow the required tags and 4-part skeleton:
         </View>
       </Modal>
 
-      {/* INTEGRATED SUBCATEGORY & RECIPE MODAL */}
+      {/* SUBCATEGORY DIAL & TABBED RECIPE MODAL */}
       <Modal
         visible={selectedCategory !== null}
         animationType="fade"
@@ -2062,7 +2246,7 @@ Follow the required tags and 4-part skeleton:
                       setSelectedCategory(null);
                       setActiveDish(null);
                     }}
-                    style={[styles.backButton, wheelStyles.headerSide]}
+                    style={[styles.backButton, { width: dial.headerSideW }]}
                   >
                     <Text style={styles.backButtonText}>‹ {lang === 'fa' ? 'صفحه اصلی' : 'Home'}</Text>
                   </TouchableOpacity>
@@ -2072,17 +2256,17 @@ Follow the required tags and 4-part skeleton:
                       {lang === 'fa' ? selectedCategory?.titleFa : selectedCategory?.titleEn.replace('\n', ' ')}
                     </Text>
                   </View>
-                  <View style={wheelStyles.headerSide} />
+                  <View style={{ width: dial.headerSideW }} />
                 </View>
 
-                <View style={[styles.dialViewport, wheelStyles.viewport, { marginTop: 20, alignSelf: 'center' }]}>
-                  <View style={[styles.dialContainer, wheelStyles.container]}>
+                <View style={[styles.dialViewport, { width: dial.size, height: dial.size }, { marginTop: 20, alignSelf: 'center' }]}>
+                  <View style={[styles.dialContainer, { width: dial.size, height: dial.size }]}>
                     <ImageBackground
                       source={require('./assets/persian_wheel.jpg')}
-                      style={[styles.wheelBackground, wheelStyles.background]}
-                      imageStyle={[styles.wheelImageStyle, wheelStyles.image]}
+                      style={[styles.wheelBackground, { width: dial.size, height: dial.size }]}
+                      imageStyle={[styles.wheelImageStyle, { borderRadius: dial.size / 2 }]}
                     >
-                      <View style={[styles.centerMedallionContainer, wheelStyles.medallion]}>
+                      <View style={[styles.centerMedallionContainer, circleBox(dial.medallion)]}>
                         <Image
                           source={require('./assets/iran_map.jpg')}
                           style={styles.centerMedallionImage}
@@ -2142,7 +2326,6 @@ Follow the required tags and 4-part skeleton:
               </View>
             ) : (
               <View style={{ flex: 1, width: '100%' }}>
-                {/* RECIPE HEADER WITH IMPROVED SAVE RECIPE BUTTON COPY */}
                 <View style={styles.header}>
                   <TouchableOpacity
                     onPress={() => {
@@ -2325,207 +2508,6 @@ Follow the required tags and 4-part skeleton:
         </View>
       </Modal>
 
-      {/* PERSIAN DINING BUTLER TAB (WITH SEGMENTED TABBED RECIPES) */}
-      {activeTab === 'butler' && (
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={[styles.butlerTabContainer, { paddingTop: Math.max(insets.top, 18) + 4, bottom: tabBarHeight + TAB_CENTER_OVERHANG }]}
-        >
-          <View style={[styles.butlerCard, styles.butlerCardTab]}>
-            <View style={styles.heritageHeaderRow}>
-              <Text style={styles.heritageIconLarge}>🤵</Text>
-              <View style={{ flex: 1, marginLeft: 10 }}>
-                <Text style={styles.heritageModalTitle}>
-                  {lang === 'fa' ? 'میزبان درباری (Persian Butler)' : 'Persian Dining Butler (میزبان)'}
-                </Text>
-                <Text style={styles.heritageModalPersian}>
-                  {isFusionEnabled
-                    ? (lang === 'fa' ? `حالت ویژه: فیوژن ایرانی-${selectedCuisine} فعال است` : `Special Mode: Persian-${selectedCuisine} Fusion`)
-                    : (lang === 'fa' ? 'طراحی متناسب ضیافت بر اساس تعداد نفرات و رژیم غذایی' : 'Banquet curation & dietary tailoring')}
-                </Text>
-              </View>
-
-              <View style={styles.fusionSwitchContainer}>
-                <Text style={styles.fusionSwitchLabel}>
-                  {lang === 'fa' ? 'فیوژن' : 'Fusion'}
-                </Text>
-                <Switch
-                  value={isFusionEnabled}
-                  onValueChange={(val) => {
-                    setIsFusionEnabled(val);
-                    if (val) {
-                      Alert.alert(
-                        lang === 'fa' ? 'حالت فیوژن فعال شد' : 'Fusion Mode Activated',
-                        lang === 'fa' 
-                          ? 'کشور مورد نظر خود (آمریکایی، ژاپنی، چینی، مکزیکی) را انتخاب فرمایید تا منوی ترکیبی ویژه آماده گردد.'
-                          : 'Select your desired culture (American, Japanese, Chinese, Mexican) to tailor an innovative fusion banquet.'
-                      );
-                    }
-                  }}
-                  trackColor={{ false: '#334155', true: '#c59b27' }}
-                  thumbColor={isFusionEnabled ? '#f6d860' : '#94a3b8'}
-                />
-              </View>
-            </View>
-
-            <ScrollView ref={butlerScrollRef} style={{ flex: 1, marginVertical: 10 }} showsVerticalScrollIndicator={true} keyboardShouldPersistTaps="handled">
-              {isFusionEnabled && (
-                <View style={styles.cuisineSelectorCard}>
-                  <Text style={styles.cuisineSelectorHeading}>
-                    {lang === 'fa' ? 'کشور مقصد جهت ترکیب با سبک اصیل ایرانی:' : 'Select Target Fusion Cuisine:'}
-                  </Text>
-                  <View style={styles.cuisinePillsRow}>
-                    {(['American', 'Japanese', 'Chinese', 'Mexican'] as FusionCuisine[]).map((c) => {
-                      const active = selectedCuisine === c;
-                      const icons: Record<FusionCuisine, string> = {
-                        American: '🇺🇸 American',
-                        Japanese: '🇯🇵 Japanese',
-                        Chinese: '🇨🇳 Chinese',
-                        Mexican: '🇲🇽 Mexican',
-                      };
-                      const iconsFa: Record<FusionCuisine, string> = {
-                        American: '🇺🇸 آمریکایی',
-                        Japanese: '🇯🇵 ژاپنی',
-                        Chinese: '🇨🇳 چینی',
-                        Mexican: '🇲🇽 مکزیکی',
-                      };
-                      return (
-                        <TouchableOpacity
-                          key={c}
-                          style={[styles.cuisinePill, active && styles.cuisinePillActive]}
-                          onPress={() => setSelectedCuisine(c)}
-                        >
-                          <Text style={[styles.cuisinePillText, active && styles.cuisinePillTextActive]}>
-                            {lang === 'fa' ? iconsFa[c] : icons[c]}
-                          </Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-                </View>
-              )}
-
-              <Text style={styles.butlerQuestionLabel}>{lang === 'fa' ? 'چند نفر مهمان دارید؟' : 'How many guests will be dining?'}</Text>
-              <TextInput
-                style={[styles.butlerInput, isRTL && { textAlign: 'right' }]}
-                keyboardType="numeric"
-                value={guestCount}
-                onChangeText={setGuestCount}
-                placeholder="e.g. 4, 8, 12"
-                placeholderTextColor="#94a3b8"
-              />
-
-              <Text style={styles.butlerQuestionLabel}>{lang === 'fa' ? 'آیا حساسیت غذایی یا رژیم خاصی دارید؟' : 'Any food allergies or dietary restrictions?'}</Text>
-              <TextInput
-                style={[styles.butlerInput, isRTL && { textAlign: 'right' }]}
-                value={allergiesInput}
-                onChangeText={setAllergiesInput}
-                placeholder={lang === 'fa' ? 'مثال: بدون گردو، بدون گلوتن، گیاهی، کم‌نمک' : 'e.g. Walnut allergy, Gluten-free, Vegetarian, Low sodium'}
-                placeholderTextColor="#94a3b8"
-              />
-
-              <Text style={styles.butlerQuestionLabel}>{lang === 'fa' ? 'طعم یا ذائقه خاصی مد نظر دارید؟' : 'Flavor preferences or special requests?'}</Text>
-              <TextInput
-                style={[styles.butlerInput, isRTL && { textAlign: 'right' }]}
-                value={specialPreferences}
-                onChangeText={setSpecialPreferences}
-                placeholder={lang === 'fa' ? 'مثال: پر زعفران، ترش با رب انار، ته‌دیگ ترد' : 'e.g. Extra saffron, sour pomegranate focus, crispy Tahdig'}
-                placeholderTextColor="#94a3b8"
-              />
-
-              <TouchableOpacity style={styles.butlerSubmitBtn} onPress={handleConsultButler} disabled={butlerSuggestLoading}>
-                <Text style={styles.butlerSubmitBtnText}>
-                  {butlerSuggestLoading 
-                    ? (lang === 'fa' ? 'در حال چینش ضیافت...' : 'Curating Menu & Proportions...') 
-                    : isFusionEnabled
-                      ? (lang === 'fa' ? `✨ طراحی ضیافت فیوژن ایرانی-${selectedCuisine}` : `✨ Curate Persian-${selectedCuisine} Fusion`)
-                      : (lang === 'fa' ? 'طراحی منوی متناسب ضیافت' : 'Curate My Banquet Menu')}
-                </Text>
-              </TouchableOpacity>
-
-              {butlerSuggestLoading && (
-                <View style={{ paddingVertical: 16, alignItems: 'center' }}>
-                  <ActivityIndicator size="small" color="#f6d860" />
-                </View>
-              )}
-
-              {/* BUTLER'S SUGGESTION CIRCLES */}
-              {suggestedCircles.length > 0 && (
-                <View style={styles.suggestedContainer}>
-                  <Text style={styles.suggestedTitle}>
-                    {isFusionEnabled
-                      ? (lang === 'fa' ? `✨ منوی فیوژن ایرانی-${selectedCuisine}:` : `✨ Persian-${selectedCuisine} Fusion Menu:`)
-                      : (lang === 'fa' ? 'پیشنهاد هماهنگ میزبان برای ضیافت:' : "Butler's Suggested Course Harmony:")}
-                  </Text>
-                  <Text style={styles.suggestedSubtext}>
-                    {lang === 'fa' ? 'جهت مشاهده مقادیر و دستور پخت کامل، هر دایره را لمس فرمایید:' : 'Tap any circular course to review its scaled recipe:'}
-                  </Text>
-
-                  <View style={styles.suggestedCirclesGrid}>
-                    {suggestedCircles.map((item) => {
-                      const isSelected = selectedButlerDish === item.dish;
-                      return (
-                        <TouchableOpacity
-                          key={item.dish}
-                          style={[styles.suggestedDishCircle, isSelected && styles.suggestedDishCircleActive]}
-                          onPress={() => handleSelectSuggestedDish(item.dish, item.role)}
-                          activeOpacity={0.8}
-                        >
-                          <Text style={styles.suggestedDishIcon}>{item.icon}</Text>
-                          <Text style={[styles.suggestedDishName, isSelected && styles.suggestedDishNameActive]} numberOfLines={2}>
-                            {item.dish}
-                          </Text>
-                          <Text style={styles.suggestedDishRole}>{item.role}</Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-                </View>
-              )}
-
-              {/* BUTLER RECIPE LOADING INDICATOR */}
-              {butlerRecipeLoading && (
-                <View style={{ paddingVertical: 20, alignItems: 'center' }}>
-                  <ActivityIndicator size="large" color="#f6d860" />
-                  <Text style={{ color: '#f6d860', fontSize: 13, marginTop: 8, fontWeight: '700' }}>
-                    {lang === 'fa' ? 'در حال نگارش دستور پخت، زمان‌ها و فوت کوزه‌گری...' : 'Generating recipe instructions & secrets...'}
-                  </Text>
-                </View>
-              )}
-
-              {/* TABBED BUTLER RECIPE INSTRUCTIONS */}
-              {parsedButlerRecipe && !butlerRecipeLoading && (
-                <View style={styles.butlerResponseBox}>
-                  <View style={styles.recipeTitleRow}>
-                    <Text style={styles.butlerResponseTitle}>{selectedButlerDish}</Text>
-                    <View style={styles.actionButtonRow}>
-                      <TouchableOpacity style={styles.shareBtn} onPress={() => handleExportPDF(selectedButlerDish || 'Banquet Recipe', butlerRecipeText)}>
-                        <Text style={styles.shareBtnText}>📄 PDF</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity style={styles.saveRecipeBtn} onPress={() => handleSaveToCookbook(selectedButlerDish || 'Banquet Recipe', butlerRecipeText)}>
-                        <Text style={styles.saveRecipeBtnText}>💾 {lang === 'fa' ? 'ذخیره دستور' : 'Save Recipe'}</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-
-                  <RecipeTabbedDisplay
-                    parsed={parsedButlerRecipe}
-                    lang={lang}
-                    isSpeaking={isSpeaking}
-                    speakingSection={speakingSection}
-                    currentStepIndex={currentStepIndex}
-                    onSpeakSection={(secKey, text) => speakSanitizedText(text, secKey)}
-                    onStopSpeech={stopActiveSpeech}
-                    onReadStep={(idx) => handleReadStep(idx, parsedButlerRecipe)}
-                    onShowTemperament={() => setShowTemperamentInfo(true)}
-                  />
-                </View>
-              )}
-            </ScrollView>
-          </View>
-        </KeyboardAvoidingView>
-      )}
-
       {/* SETTINGS MODAL */}
       <Modal visible={showSettings} animationType="slide" transparent={true} onRequestClose={() => setShowSettings(false)}>
         <View style={styles.heritageModalOverlay}>
@@ -2600,16 +2582,16 @@ Follow the required tags and 4-part skeleton:
         </View>
       </Modal>
 
-      {/* SAVED RECIPES MODAL (WITH MOGHIMI LOGO EMBEDDED) */}
+      {/* SAVED RECIPES MODAL (WITH MOGHIMI LOGO EMBEDDED)[cite: 1] */}
       <Modal visible={showCookbook} animationType="slide" onRequestClose={() => setShowCookbook(false)}>
         <View style={[styles.rootContainer, { paddingTop: Math.max(insets.top, 18), paddingBottom: Math.max(insets.bottom, 12) }]}>
           <View style={styles.outerFrame}>
             <View style={styles.header}>
-              <TouchableOpacity onPress={() => setShowCookbook(false)}               style={[styles.backButton, wheelStyles.headerSide]}>
+              <TouchableOpacity onPress={() => setShowCookbook(false)} style={[styles.backButton, { width: dial.headerSideW }]}>
                 <Text style={styles.backButtonText}>‹ {lang === 'fa' ? 'بازگشت' : 'Back'}</Text>
               </TouchableOpacity>
               <Text style={styles.headerTitle}>{lang === 'fa' ? 'کتابچه آفلاین شما' : 'Saved Recipes'}</Text>
-                            <View style={wheelStyles.headerSide} />
+              <View style={{ width: dial.headerSideW }} />
             </View>
 
             <ScrollView style={styles.recipeScroll} contentContainerStyle={styles.recipeContent}>
@@ -2662,8 +2644,8 @@ Follow the required tags and 4-part skeleton:
 
 export default function App() {
   return (
-    <SafeAreaProvider>
-      <PersianAppContent />
+    <SafeAreaProvider initialMetrics={initialWindowMetrics}>
+      <PersianAppInner />
     </SafeAreaProvider>
   );
 }
@@ -2697,56 +2679,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     position: 'relative',
   },
-  headerSavedButton: {
-    backgroundColor: '#c59b27',
-    paddingHorizontal: 7,
-    paddingVertical: 4,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: 76,
-  },
-  headerSavedCounter: {
-    backgroundColor: '#0c1b33',
-    borderRadius: 9,
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-    marginLeft: 2,
-  },
-  headerSavedCounterText: {
-    fontSize: 8.5,
-    fontWeight: '900',
-    color: '#f6d860',
-  },
-  headerIconButton: {
-    backgroundColor: '#c59b27',
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: 76,
-  },
-  headerIconText: {
-    fontSize: 13,
-  },
-  headerButtonLabel: {
-    fontSize: 7.5,
-    fontWeight: '800',
-    color: '#0c1b33',
-    marginTop: 1,
-  },
-  headerSettingsLabel: {
-    fontSize: 7.5,
-    fontWeight: '800',
-    color: '#0c1b33',
-    marginTop: 1,
-  },
-  headerCenter: {
-    alignItems: 'center',
-    flex: 1,
-    paddingHorizontal: 2,
-  },
   headerTitle: {
     fontSize: 21,
     fontWeight: '900',
@@ -2767,24 +2699,248 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: 1,
     borderColor: '#c59b27',
-    marginTop: 4,
     overflow: 'hidden',
   },
   langPill: {
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     paddingVertical: 3,
   },
   langPillActive: {
     backgroundColor: '#c59b27',
   },
   langPillText: {
-    fontSize: 10,
+    fontSize: 9.5,
     fontWeight: '700',
     color: '#f6d860',
   },
   langPillTextActive: {
     color: '#0c1b33',
     fontWeight: '900',
+  },
+  courseBucketBarWrapper: {
+    width: '100%',
+    marginVertical: 4,
+  },
+  courseBucketScroll: {
+    paddingHorizontal: 2,
+    gap: 6,
+  },
+  courseBucketPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(16, 36, 68, 0.95)',
+    borderWidth: 1.2,
+    borderColor: '#c59b27',
+    borderRadius: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    gap: 4,
+  },
+  courseBucketPillActive: {
+    backgroundColor: '#c59b27',
+    borderColor: '#f6d860',
+  },
+  courseBucketIcon: {
+    fontSize: 12,
+  },
+  courseBucketText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#fef08a',
+  },
+  courseBucketTextActive: {
+    color: '#0c1b33',
+    fontWeight: '900',
+  },
+  wheelBottomActionRow: {
+    width: '100%',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  compactSurpriseBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(120, 53, 15, 0.95)',
+    borderWidth: 1.5,
+    borderColor: '#f6d860',
+    borderRadius: 20,
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  compactSurpriseBtnSpinning: {
+    backgroundColor: '#78350f',
+    borderColor: '#ffffff',
+  },
+  compactSurpriseIcon: {
+    fontSize: 16,
+  },
+  compactSurpriseText: {
+    fontSize: 11.5,
+    fontWeight: '900',
+    color: '#ffffff',
+  },
+  surpriseOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 18,
+  },
+  surpriseCourseCard: {
+    width: '100%',
+    backgroundColor: '#0c1b33',
+    borderRadius: 18,
+    borderWidth: 2,
+    borderColor: '#f6d860',
+    padding: 16,
+    maxHeight: 520,
+  },
+  surpriseCourseHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: '#c59b27',
+    paddingBottom: 10,
+    marginBottom: 10,
+  },
+  surpriseCourseTitle: {
+    color: '#f6d860',
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  surpriseCourseSubtitle: {
+    color: '#cbd5e1',
+    fontSize: 11,
+    marginTop: 2,
+  },
+  surprisePillList: {
+    gap: 8,
+  },
+  surpriseCourseButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(16, 36, 68, 0.95)',
+    borderWidth: 1.2,
+    borderColor: '#c59b27',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  surpriseCourseBtnIcon: {
+    fontSize: 22,
+    marginRight: 10,
+  },
+  surpriseCourseBtnText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  surpriseCourseBtnSub: {
+    color: '#fef08a',
+    fontSize: 9.5,
+    marginTop: 1,
+  },
+  surpriseCourseBtnArrow: {
+    color: '#f6d860',
+    fontSize: 18,
+    fontWeight: '900',
+    marginLeft: 6,
+  },
+  spinConfirmationCard: {
+    width: '100%',
+    backgroundColor: '#0c1b33',
+    borderRadius: 18,
+    borderWidth: 2.5,
+    borderColor: '#f6d860',
+    padding: 20,
+    alignItems: 'center',
+  },
+  spinConfirmationIcon: {
+    fontSize: 34,
+    marginBottom: 8,
+  },
+  spinConfirmationHeading: {
+    color: '#cbd5e1',
+    fontSize: 12.5,
+    fontWeight: '700',
+  },
+  spinConfirmationDish: {
+    color: '#f6d860',
+    fontSize: 22,
+    fontWeight: '900',
+    textAlign: 'center',
+    marginVertical: 8,
+  },
+  spinConfirmationCategory: {
+    color: '#94a3b8',
+    fontSize: 11.5,
+    marginBottom: 14,
+  },
+  spinConfirmationQuestion: {
+    color: '#ffffff',
+    fontSize: 13.5,
+    fontWeight: '800',
+    textAlign: 'center',
+    marginBottom: 18,
+  },
+  spinConfirmationButtonRow: {
+    flexDirection: 'row',
+    gap: 10,
+    width: '100%',
+  },
+  spinConfirmNoBtn: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+    borderWidth: 1.5,
+    borderColor: '#94a3b8',
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  spinConfirmNoText: {
+    color: '#cbd5e1',
+    fontWeight: '800',
+    fontSize: 12,
+  },
+  spinConfirmYesBtn: {
+    flex: 1.2,
+    backgroundColor: '#c59b27',
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  spinConfirmYesText: {
+    color: '#0c1b33',
+    fontWeight: '900',
+    fontSize: 12.5,
+  },
+  floatingStopBar: {
+    backgroundColor: '#ef4444',
+    paddingVertical: 8,
+    borderRadius: 10,
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  floatingStopText: {
+    color: '#ffffff',
+    fontWeight: '900',
+    fontSize: 12,
+  },
+  butlerBucketIndicator: {
+    backgroundColor: 'rgba(197, 155, 39, 0.2)',
+    borderWidth: 1,
+    borderColor: '#f6d860',
+    borderRadius: 8,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    marginBottom: 6,
+    alignSelf: 'flex-start',
+  },
+  butlerBucketIndicatorText: {
+    fontSize: 10.5,
+    fontWeight: '800',
+    color: '#f6d860',
   },
   searchBarContainer: {
     width: '100%',
@@ -2881,43 +3037,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 18,
   },
-  timeOfDayBanner: {
-    width: '100%',
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(15, 23, 42, 0.95)',
-    borderWidth: 1.2,
-    borderColor: '#c59b27',
-    borderRadius: 10,
-    paddingVertical: 5,
-    paddingHorizontal: 8,
-    marginTop: 2,
-    marginBottom: 2,
-  },
-  timeOfDayIcon: {
-    fontSize: 20,
-  },
-  timeOfDayTitle: {
-    fontSize: 10.5,
-    fontWeight: '900',
-    color: '#f6d860',
-  },
-  timeOfDaySub: {
-    fontSize: 9.5,
-    color: '#e2e8f0',
-    fontWeight: '600',
-  },
-  timeOfDayActionBtn: {
-    backgroundColor: '#c59b27',
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
-  timeOfDayActionText: {
-    fontSize: 9.5,
-    fontWeight: '900',
-    color: '#0c1b33',
-  },
   backButton: {
     paddingVertical: 4,
     alignItems: 'flex-start',
@@ -2932,23 +3051,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  cornerBadge: {
-    position: 'absolute',
-    width: 90,
-    height: 54,
-    backgroundColor: 'rgba(12, 27, 51, 0.96)',
-    borderWidth: 1.8,
-    borderColor: '#c59b27',
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 15,
-    padding: 3,
-  },
-  cornerTopLeft: { top: 4, left: 4 },
-  cornerTopRight: { top: 4, right: 4 },
-  cornerBottomLeft: { bottom: 4, left: 4 },
-  cornerBottomRight: { bottom: 4, right: 4 },
   cornerLogoBadge: {
     backgroundColor: '#0c1b33',
     borderWidth: 1.8,
@@ -2962,7 +3064,7 @@ const styles = StyleSheet.create({
   },
   centeredLogoBadge: {
     borderRadius: 12,
-    marginBottom: 14,
+    marginBottom: 6,
   },
   butlerTabContainer: {
     position: 'absolute',
@@ -2972,55 +3074,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#070f1e',
     paddingHorizontal: 14,
     paddingBottom: 8,
-  },
-  cornerActionBadge: {
-    backgroundColor: 'rgba(16, 36, 68, 0.96)',
-    borderColor: '#f6d860',
-  },
-  cornerActionIcon: {
-    fontSize: 15,
-  },
-  cornerActionTitle: {
-    fontSize: 9.5,
-    fontWeight: '900',
-    color: '#f6d860',
-    textAlign: 'center',
-    marginTop: 1,
-  },
-  cornerActionSub: {
-    fontSize: 8,
-    fontWeight: '700',
-    color: '#cbd5e1',
-    textAlign: 'center',
-  },
-  regionalCenterBadge: {
-    position: 'absolute',
-    bottom: 4,
-    width: 140,
-    height: 54,
-    backgroundColor: 'rgba(120, 53, 15, 0.96)',
-    borderWidth: 2,
-    borderColor: '#f6d860',
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 16,
-    padding: 2,
-  },
-  regionalBadgeIcon: {
-    fontSize: 14,
-  },
-  regionalBadgeTitle: {
-    fontSize: 10,
-    fontWeight: '900',
-    color: '#ffffff',
-    textAlign: 'center',
-  },
-  regionalBadgeSub: {
-    fontSize: 7.5,
-    fontWeight: '700',
-    color: '#fef08a',
-    textAlign: 'center',
   },
   dialContainer: {
     alignItems: 'center',
@@ -3036,9 +3089,6 @@ const styles = StyleSheet.create({
     borderColor: '#d4af37',
   },
   centerMedallionContainer: {
-    width: 90,
-    height: 90,
-    borderRadius: 45,
     borderWidth: 3,
     borderColor: '#f6d860',
     overflow: 'hidden',
@@ -3050,51 +3100,68 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   centerMedallionImage: { width: '100%', height: '100%' },
-  outerCircle: {
+  bucketCircle: {
     position: 'absolute',
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: 'rgba(12, 27, 51, 0.95)',
-    borderWidth: 1.5,
+    backgroundColor: 'rgba(12, 27, 51, 0.96)',
+    borderWidth: 2,
     borderColor: '#f6d860',
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 25,
+    padding: 2,
   },
-  outerIcon: { fontSize: 14 },
-  outerLabel: { fontSize: 7.2, fontWeight: '800', color: '#ffffff', textAlign: 'center', lineHeight: 8.5 },
-  innerCircle: {
+  bucketCircleIcon: {
+    fontSize: 17,
+  },
+  bucketCircleLabel: {
+    fontWeight: '800',
+    color: '#ffffff',
+    textAlign: 'center',
+    lineHeight: 11,
+    marginTop: 1,
+  },
+  circleMagnifiedLarge: {
+    zIndex: 100,
+    transform: [{ scale: 1.65 }],
+    backgroundColor: '#081730',
+    borderColor: '#ffffff',
+    borderWidth: 2.5,
+  },
+  circleSpinLightGlowing: {
+    borderColor: '#ffffff',
+    borderWidth: 3.5,
+    backgroundColor: '#f6d860',
+    transform: [{ scale: 1.3 }],
+    shadowColor: '#f6d860',
+    shadowOpacity: 1,
+    shadowRadius: 10,
+    elevation: 12,
+  },
+  labelMagnified: {
+    fontSize: 11,
+    color: '#f6d860',
+    fontWeight: '900',
+  },
+  subDishCircle: {
     position: 'absolute',
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: 'rgba(16, 36, 68, 0.96)',
-    borderWidth: 1.2,
-    borderColor: '#eab308',
+    backgroundColor: 'rgba(12, 27, 51, 0.96)',
+    borderWidth: 2,
+    borderColor: '#f6d860',
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 24,
+    zIndex: 25,
+    padding: 3,
   },
-  innerIcon: { fontSize: 11 },
-  innerLabel: { fontSize: 6.5, fontWeight: '700', color: '#fef08a', textAlign: 'center', lineHeight: 7.5 },
-  circleMagnified: {
+  subDishMagnified: {
     zIndex: 100,
-    transform: [{ scale: 1.85 }],
+    transform: [{ scale: 1.5 }],
     backgroundColor: '#081730',
     borderColor: '#ffffff',
     borderWidth: 2.5,
   },
-  circleMagnifiedInner: {
-    zIndex: 100,
-    transform: [{ scale: 1.95 }],
-    backgroundColor: '#081730',
-    borderColor: '#ffffff',
-    borderWidth: 2.5,
-  },
-  iconMagnified: { fontSize: 17 },
-  labelMagnified: { fontSize: 7.5, color: '#ffffff', fontWeight: '900' },
-  persianMagnified: { fontSize: 6, color: '#f6d860', fontWeight: '700', marginTop: 1 },
+  subDishIcon: { fontSize: 15 },
+  subDishLabel: { fontSize: 8, fontWeight: '800', color: '#ffffff', textAlign: 'center', marginTop: 2, lineHeight: 9.5 },
+  subDishLabelMagnified: { fontSize: 8.5, color: '#ffffff', fontWeight: '900' },
   bottomGuidePill: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -3102,23 +3169,23 @@ const styles = StyleSheet.create({
     borderWidth: 1.2,
     borderColor: '#c59b27',
     borderRadius: 20,
-    paddingVertical: 6,
+    paddingVertical: 5,
     paddingHorizontal: 16,
     gap: 6,
-    marginVertical: 4,
+    marginTop: 4,
     alignSelf: 'center',
   },
   bottomGuideIcon: {
-    fontSize: 14,
+    fontSize: 13,
   },
   bottomGuideText: {
-    fontSize: 10.5,
+    fontSize: 10,
     fontWeight: '800',
     color: '#f6d860',
   },
   footerInstruction: {
     color: '#e2d9cc',
-    fontSize: 9.5,
+    fontSize: 9,
     textAlign: 'center',
     fontStyle: 'italic',
     paddingBottom: 2,
@@ -3146,8 +3213,8 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 18,
     marginTop: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(246, 216, 96, 0.35)',
+    borderWidth: 1.5,
+    borderColor: '#f6d860',
   },
   heroEyebrow: { color: '#f6d860', fontSize: 12, fontWeight: '800', letterSpacing: 0.8, textTransform: 'uppercase' },
   heroTitle: { color: '#ffffff', fontSize: 24, fontWeight: '900', marginTop: 6 },
@@ -3167,19 +3234,109 @@ const styles = StyleSheet.create({
   },
   quickIcon: { fontSize: 22 },
   quickTitle: { color: '#e2e8f0', fontSize: 11.5, fontWeight: '700', marginTop: 6, textAlign: 'center' },
-  sectionHeading: { color: '#ffffff', fontSize: 17, fontWeight: '800', marginTop: 22, marginBottom: 10 },
-  categoryGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 10 },
-  categoryTile: {
-    width: '48%',
-    backgroundColor: '#0f2240',
-    borderRadius: 16,
-    padding: 14,
-    minHeight: 84,
-    borderWidth: 1,
-    borderColor: 'rgba(148, 163, 184, 0.18)',
+  menuBookMainHeading: {
+    color: '#f6d860',
+    fontSize: 18,
+    fontWeight: '900',
+    marginTop: 20,
+    marginBottom: 8,
+    letterSpacing: 0.5,
   },
-  categoryTileIcon: { fontSize: 26 },
-  categoryTileTitle: { color: '#f1f5f9', fontSize: 13, fontWeight: '700', marginTop: 8 },
+  menuFolioCard: {
+    backgroundColor: '#0c1b33',
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: '#c59b27',
+    padding: 14,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  menuFolioHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  menuFolioIcon: {
+    fontSize: 26,
+  },
+  menuFolioTitle: {
+    color: '#f6d860',
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  menuFolioSubtitle: {
+    color: '#cbd5e1',
+    fontSize: 10.5,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  menuFolioOpenDialBtn: {
+    backgroundColor: '#c59b27',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  menuFolioOpenDialText: {
+    color: '#0c1b33',
+    fontSize: 11,
+    fontWeight: '900',
+  },
+  menuFolioGoldDivider: {
+    height: 1,
+    backgroundColor: 'rgba(197, 155, 39, 0.4)',
+    marginVertical: 10,
+  },
+  menuFolioGrid: {
+    gap: 8,
+  },
+  menuFolioCategoryBox: {
+    backgroundColor: 'rgba(15, 23, 42, 0.75)',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(197, 155, 39, 0.25)',
+    padding: 8,
+  },
+  menuFolioCategoryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  menuFolioCatIcon: {
+    fontSize: 15,
+    marginRight: 6,
+  },
+  menuFolioCatTitle: {
+    flex: 1,
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  menuFolioCatArrow: {
+    color: '#f6d860',
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  menuFolioDishesPillsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  menuFolioDishPill: {
+    backgroundColor: 'rgba(12, 27, 51, 0.95)',
+    borderWidth: 1,
+    borderColor: '#c59b27',
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  menuFolioDishPillText: {
+    color: '#fef08a',
+    fontSize: 9.5,
+    fontWeight: '700',
+  },
   profileHeader: { alignItems: 'center', paddingVertical: 20 },
   profileAvatar: {
     width: 88,
@@ -3556,29 +3713,6 @@ const styles = StyleSheet.create({
     color: '#f6d860',
     flex: 1,
   },
-  subDishCircle: {
-    position: 'absolute',
-    width: 68,
-    height: 68,
-    borderRadius: 34,
-    backgroundColor: 'rgba(12, 27, 51, 0.96)',
-    borderWidth: 2,
-    borderColor: '#f6d860',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 25,
-    padding: 3,
-  },
-  subDishMagnified: {
-    zIndex: 100,
-    transform: [{ scale: 1.5 }],
-    backgroundColor: '#081730',
-    borderColor: '#ffffff',
-    borderWidth: 2.5,
-  },
-  subDishIcon: { fontSize: 15 },
-  subDishLabel: { fontSize: 8, fontWeight: '800', color: '#ffffff', textAlign: 'center', marginTop: 2, lineHeight: 9.5 },
-  subDishLabelMagnified: { fontSize: 8.5, color: '#ffffff', fontWeight: '900' },
   fullScreenRecipeScroll: {
     flex: 1,
     width: '100%',
@@ -3621,7 +3755,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
-    marginLeft: 0,
   },
   checkboxOn: { backgroundColor: '#f6d860', borderColor: '#f6d860' },
   checkboxTick: { color: '#0c1b33', fontWeight: '900', fontSize: 14, lineHeight: 16 },
@@ -3727,92 +3860,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  recipeMetaTopRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 6,
-  },
-  temperamentBadgeButton: {
-    flex: 1.2,
-    padding: 8,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  temperamentBadgeText: {
-    fontSize: 12.5,
-    fontWeight: '900',
-  },
-  temperamentSubNote: {
-    fontSize: 9.5,
-    color: '#f6d860',
-    marginTop: 3,
-    fontWeight: '800',
-    textAlign: 'center',
-    textDecorationLine: 'underline',
-  },
-  timeCardBox: {
-    flex: 1.2,
-    backgroundColor: 'rgba(15, 23, 42, 0.9)',
-    borderWidth: 1,
-    borderColor: '#c59b27',
-    borderRadius: 10,
-    padding: 8,
-    justifyContent: 'center',
-  },
-  timeCardLine: {
-    fontSize: 10.5,
-    color: '#cbd5e1',
-    fontWeight: '700',
-    marginVertical: 1,
-  },
-  timeValText: {
-    color: '#f6d860',
-    fontWeight: '800',
-  },
-  servingBaselineTag: {
-    backgroundColor: 'rgba(12, 27, 51, 0.95)',
-    borderWidth: 1,
-    borderColor: '#c59b27',
-    borderRadius: 6,
-    paddingVertical: 5,
-    paddingHorizontal: 8,
-    marginBottom: 6,
-    alignItems: 'center',
-  },
-  servingBaselineText: {
-    fontSize: 10.5,
-    color: '#fef08a',
-    fontWeight: '800',
-    textAlign: 'center',
-  },
-  nutritionRow: {
-    flexDirection: 'row',
-    gap: 6,
-    marginBottom: 8,
-  },
-  macroPill: {
-    flex: 1,
-    backgroundColor: 'rgba(16, 36, 68, 0.9)',
-    borderWidth: 1,
-    borderColor: '#c59b27',
-    borderRadius: 8,
-    paddingVertical: 5,
-    alignItems: 'center',
-  },
-  macroLabel: {
-    fontSize: 8.5,
-    color: '#cbd5e1',
-    fontWeight: '700',
-    textTransform: 'uppercase',
-  },
-  macroValue: {
-    fontSize: 11.5,
-    fontWeight: '900',
-    color: '#f6d860',
-    marginTop: 1,
-  },
   miniAudioText: {
     fontSize: 9.5,
     fontWeight: '800',
@@ -3828,16 +3875,6 @@ const styles = StyleSheet.create({
   },
   ingredientRowRTL: {
     flexDirection: 'row-reverse',
-  },
-  ingredientBulletLTR: {
-    fontSize: 10,
-    marginRight: 8,
-    marginTop: 2,
-  },
-  ingredientBulletRTL: {
-    fontSize: 10,
-    marginLeft: 8,
-    marginTop: 2,
   },
   ingredientText: {
     fontSize: 14,
