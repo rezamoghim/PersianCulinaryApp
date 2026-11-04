@@ -9,9 +9,10 @@ import {
   Alert,
   ImageBackground,
   Image,
-  Dimensions,
+  useWindowDimensions,
   Modal,
   TextInput,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Switch,
@@ -23,15 +24,42 @@ import * as Sharing from 'expo-sharing';
 import { initDatabase, insertRecipe, getAllSavedRecipes, deleteRecipeById, RecipeRecord } from './src/db/database';
 import { askCulinaryHelper } from './src/services/aiService';
 
-const { width } = Dimensions.get('window');
-const WHEEL_SIZE = Math.min(width - 24, 370);
+// Layout was designed around a 370pt wheel; everything dial-related scales from that.
+const DESIGN_WHEEL_SIZE = 370;
+// Horizontal space used by the outer frame margin, border and padding.
+const FRAME_HORIZONTAL_INSET = 40;
 
-const CENTER_X = WHEEL_SIZE / 2;
-const CENTER_Y = WHEEL_SIZE / 2;
+function getDialMetrics(windowWidth: number, windowHeight: number) {
+  const size = Math.max(
+    240,
+    Math.min(windowWidth - FRAME_HORIZONTAL_INSET, windowHeight * 0.55, 560)
+  );
+  const s = size / DESIGN_WHEEL_SIZE;
+  return {
+    size,
+    s,
+    center: size / 2,
+    outerRadius: size / 2 - 28 * s,
+    innerRadius: size / 2 - 82 * s,
+    subRadius: size / 2 - 44 * s,
+    outerDiameter: 48 * s,
+    innerDiameter: 38 * s,
+    subDiameter: 68 * s,
+    badgeW: 90 * s,
+    badgeH: 54 * s,
+    regionalW: 140 * s,
+    medallion: 90 * s,
+    headerSideW: Math.round(windowWidth * 0.2),
+  };
+}
 
-const OUTER_RADIUS = WHEEL_SIZE / 2 - 28;
-const INNER_RADIUS = WHEEL_SIZE / 2 - 82;
+function circleBox(diameter: number) {
+  return { width: diameter, height: diameter, borderRadius: diameter / 2 };
+}
 
+type MainTab = 'home' | 'search' | 'wheel' | 'butler' | 'profile';
+// How far the raised centre Dial button protrudes above the tab bar
+const TAB_CENTER_OVERHANG = 32;
 type Language = 'en' | 'fa';
 type FusionCuisine = 'American' | 'Japanese' | 'Chinese' | 'Mexican';
 type RecipeTab = 'nature' | 'ingredients' | 'steps' | 'secrets';
@@ -934,6 +962,7 @@ function RecipeTabbedDisplay({
 }) {
   const isRTL = lang === 'fa';
   const [activeTab, setActiveTab] = useState<RecipeTab>('steps');
+  const [checkedIngredients, setCheckedIngredients] = useState<Record<number, boolean>>({});
 
   const getTemperamentStyle = (type: string) => {
     switch (type) {
@@ -950,93 +979,66 @@ function RecipeTabbedDisplay({
 
   return (
     <View style={{ flex: 1 }}>
-      {/* Top Metric Bar: Temperament Badge + 2-Line Prep & Cook Time */}
-      <View style={styles.recipeMetaTopRow}>
+      {/* Info chips: prep, cook, temperament */}
+      <View style={styles.chipRow}>
+        <View style={styles.infoChip}>
+          <Text style={styles.infoChipLabel}>{lang === 'fa' ? 'آماده‌سازی' : 'Prep'}</Text>
+          <Text style={styles.infoChipValue} numberOfLines={1}>⏱️ {parsed.prepTime}</Text>
+        </View>
+        <View style={styles.infoChip}>
+          <Text style={styles.infoChipLabel}>{lang === 'fa' ? 'پخت' : 'Cook'}</Text>
+          <Text style={styles.infoChipValue} numberOfLines={1}>🔥 {parsed.cookTime}</Text>
+        </View>
         <TouchableOpacity
-          style={[styles.temperamentBadgeButton, { backgroundColor: tempStyle.bg, borderColor: tempStyle.border }]}
+          style={[styles.infoChip, { backgroundColor: tempStyle.bg, borderColor: tempStyle.border }]}
           onPress={onShowTemperament}
           activeOpacity={0.8}
         >
-          <Text style={[styles.temperamentBadgeText, { color: tempStyle.text }]}>
-            {lang === 'fa' ? tempStyle.labelFa : tempStyle.labelEn}
-          </Text>
-          <Text style={styles.temperamentSubNote}>
-            ℹ️ {lang === 'fa' ? 'راهنمای طبع و مصلحات (لمس کنید)' : 'Balance Guide & Temperament'}
+          <Text style={[styles.infoChipLabel, { color: tempStyle.text }]}>{lang === 'fa' ? 'طبع ›' : 'Nature ›'}</Text>
+          <Text style={[styles.infoChipValue, { color: tempStyle.text }]} numberOfLines={1}>
+            {(lang === 'fa' ? tempStyle.labelFa : tempStyle.labelEn).replace(/\s*\(.*\)/, '')}
           </Text>
         </TouchableOpacity>
-
-        <View style={styles.timeCardBox}>
-          <Text style={styles.timeCardLine}>⏱️ {lang === 'fa' ? 'زمان آماده‌سازی:' : 'Prep Time:'} <Text style={styles.timeValText}>{parsed.prepTime}</Text></Text>
-          <Text style={styles.timeCardLine}>🔥 {lang === 'fa' ? 'زمان پخت کامل:' : 'Cook Time:'} <Text style={styles.timeValText}>{parsed.cookTime}</Text></Text>
-        </View>
       </View>
 
-      {/* Serving Weight Tag */}
-      <View style={styles.servingBaselineTag}>
-        <Text style={styles.servingBaselineText}>
-          ⚖️ {lang === 'fa'
-            ? `ارزش غذایی زیر برای ۱ پرس = ${parsed.servingSize} می‌باشد:`
-            : `Values are for one serving = ${parsed.servingSize}:`}
-        </Text>
+      {/* Macros: one stat card */}
+      <View style={styles.macroCard}>
+        {[
+          { label: lang === 'fa' ? 'کالری' : 'Calories', value: parsed.calories },
+          { label: lang === 'fa' ? 'پروتئین' : 'Protein', value: parsed.protein },
+          { label: lang === 'fa' ? 'چربی' : 'Fat', value: parsed.fat },
+          { label: lang === 'fa' ? 'کربوهیدرات' : 'Carbs', value: parsed.carbs },
+        ].map((m, i) => (
+          <View key={m.label} style={[styles.macroCol, i > 0 && styles.macroColDivider]}>
+            <Text style={styles.macroBigValue} numberOfLines={1} adjustsFontSizeToFit>{m.value}</Text>
+            <Text style={styles.macroSmallLabel}>{m.label}</Text>
+          </View>
+        ))}
       </View>
+      <Text style={styles.macroCaption}>
+        {lang === 'fa'
+          ? `ارزش غذایی برای ۱ پرس = ${parsed.servingSize}`
+          : `Per serving • ${parsed.servingSize}`}
+      </Text>
 
-      {/* Macronutrient Pills */}
-      <View style={styles.nutritionRow}>
-        <View style={styles.macroPill}>
-          <Text style={styles.macroLabel}>{lang === 'fa' ? 'کالری' : 'Calories'}</Text>
-          <Text style={styles.macroValue}>{parsed.calories}</Text>
-        </View>
-        <View style={styles.macroPill}>
-          <Text style={styles.macroLabel}>{lang === 'fa' ? 'پروتئین' : 'Protein'}</Text>
-          <Text style={styles.macroValue}>{parsed.protein}</Text>
-        </View>
-        <View style={styles.macroPill}>
-          <Text style={styles.macroLabel}>{lang === 'fa' ? 'چربی' : 'Fat'}</Text>
-          <Text style={styles.macroValue}>{parsed.fat}</Text>
-        </View>
-        <View style={styles.macroPill}>
-          <Text style={styles.macroLabel}>{lang === 'fa' ? 'کربوهیدرات' : 'Carbs'}</Text>
-          <Text style={styles.macroValue}>{parsed.carbs}</Text>
-        </View>
-      </View>
-
-      {/* SEGMENTED TAB SELECTOR (TABS ALLOW USERS TO SELECT SECTIONS DIRECTLY) */}
+      {/* Section tabs */}
       <View style={styles.recipeTabBarContainer}>
-        <TouchableOpacity
-          style={[styles.recipeTabBtn, activeTab === 'nature' && styles.recipeTabBtnActive]}
-          onPress={() => setActiveTab('nature')}
-        >
-          <Text style={[styles.recipeTabBtnText, activeTab === 'nature' && styles.recipeTabBtnTextActive]}>
-            🌿 {lang === 'fa' ? 'طبع و تاریخچه' : 'Nature'}
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.recipeTabBtn, activeTab === 'ingredients' && styles.recipeTabBtnActive]}
-          onPress={() => setActiveTab('ingredients')}
-        >
-          <Text style={[styles.recipeTabBtnText, activeTab === 'ingredients' && styles.recipeTabBtnTextActive]}>
-            🥄 {lang === 'fa' ? 'مواد لازم' : 'Ingredients'}
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.recipeTabBtn, activeTab === 'steps' && styles.recipeTabBtnActive]}
-          onPress={() => setActiveTab('steps')}
-        >
-          <Text style={[styles.recipeTabBtnText, activeTab === 'steps' && styles.recipeTabBtnTextActive]}>
-            🍳 {lang === 'fa' ? 'مراحل پخت' : 'Steps'}
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.recipeTabBtn, activeTab === 'secrets' && styles.recipeTabBtnActive]}
-          onPress={() => setActiveTab('secrets')}
-        >
-          <Text style={[styles.recipeTabBtnText, activeTab === 'secrets' && styles.recipeTabBtnTextActive]}>
-            ✨ {lang === 'fa' ? 'فوت کوزه‌گری' : 'Secrets'}
-          </Text>
-        </TouchableOpacity>
+        {([
+          { key: 'nature', label: lang === 'fa' ? 'طبع' : 'Nature' },
+          { key: 'ingredients', label: lang === 'fa' ? 'مواد لازم' : 'Ingredients' },
+          { key: 'steps', label: lang === 'fa' ? 'مراحل' : 'Steps' },
+          { key: 'secrets', label: lang === 'fa' ? 'فوت کوزه‌گری' : 'Secrets' },
+        ] as { key: RecipeTab; label: string }[]).map((t) => (
+          <TouchableOpacity
+            key={t.key}
+            style={[styles.recipeTabBtn, activeTab === t.key && styles.recipeTabBtnActive]}
+            onPress={() => setActiveTab(t.key)}
+          >
+            <Text style={[styles.recipeTabBtnText, activeTab === t.key && styles.recipeTabBtnTextActive]} numberOfLines={1}>
+              {t.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
       </View>
 
       {/* ACTIVE TAB CONTENT DISPLAY */}
@@ -1073,14 +1075,24 @@ function RecipeTabbedDisplay({
             </TouchableOpacity>
           </View>
           <View style={styles.ingredientsGrid}>
-            {parsed.ingredients.map((ing, i) => (
-              <View key={i} style={[styles.ingredientRow, isRTL && styles.ingredientRowRTL]}>
-                <Text style={isRTL ? styles.ingredientBulletRTL : styles.ingredientBulletLTR}>🔸</Text>
-                <Text style={[styles.ingredientText, isRTL ? styles.textRTL : styles.textLTR]}>
-                  {ing}
-                </Text>
-              </View>
-            ))}
+            {parsed.ingredients.map((ing, i) => {
+              const done = !!checkedIngredients[i];
+              return (
+                <TouchableOpacity
+                  key={i}
+                  activeOpacity={0.8}
+                  onPress={() => setCheckedIngredients((prev) => ({ ...prev, [i]: !prev[i] }))}
+                  style={[styles.ingredientRow, isRTL && styles.ingredientRowRTL, done && styles.ingredientRowDone]}
+                >
+                  <View style={[styles.checkbox, done && styles.checkboxOn]}>
+                    {done && <Text style={styles.checkboxTick}>✓</Text>}
+                  </View>
+                  <Text style={[styles.ingredientText, isRTL ? styles.textRTL : styles.textLTR, done && styles.ingredientTextDone]}>
+                    {ing}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
         </View>
       )}
@@ -1173,6 +1185,18 @@ function RecipeTabbedDisplay({
 
 function PersianAppContent() {
   const insets = useSafeAreaInsets();
+  const { width: winWidth, height: winHeight } = useWindowDimensions();
+  const dial = getDialMetrics(winWidth, winHeight);
+  const wheelStyles = {
+    viewport: { width: dial.size, height: dial.size },
+    container: { width: dial.size, height: dial.size },
+    background: { width: dial.size, height: dial.size },
+    image: { borderRadius: dial.size / 2 },
+    medallion: circleBox(dial.medallion),
+    badge: { width: dial.badgeW, height: dial.badgeH },
+    regional: { width: dial.regionalW, height: dial.badgeH },
+    headerSide: { width: dial.headerSideW },
+  };
   const [lang, setLang] = useState<Language>('en');
 
   const [selectedCategory, setSelectedCategory] = useState<CategoryData | null>(null);
@@ -1180,6 +1204,9 @@ function PersianAppContent() {
   const [recipeContent, setRecipeContent] = useState<string>('');
   const [parsedRecipe, setParsedRecipe] = useState<ParsedRecipe | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
+  const [activeTab, setActiveTab] = useState<MainTab>('wheel');
+  const [tabBarHeight, setTabBarHeight] = useState<number>(0);
+  const searchInputRef = useRef<React.ComponentRef<typeof TextInput>>(null);
   const [showCookbook, setShowCookbook] = useState<boolean>(false);
   const [showSettings, setShowSettings] = useState<boolean>(false);
   const [showUserGuide, setShowUserGuide] = useState<boolean>(false);
@@ -1201,7 +1228,6 @@ function PersianAppContent() {
   const [speechRate, setSpeechRate] = useState<number>(0.85);
 
   // Butler State
-  const [showButler, setShowButler] = useState<boolean>(false);
   const [isFusionEnabled, setIsFusionEnabled] = useState<boolean>(false);
   const [selectedCuisine, setSelectedCuisine] = useState<FusionCuisine>('American');
   const [guestCount, setGuestCount] = useState<string>('');
@@ -1555,54 +1581,41 @@ Follow the required tags and 4-part skeleton:
   const isRTL = lang === 'fa';
 
   return (
-    <View style={[styles.rootContainer, { paddingTop: Math.max(insets.top, 18), paddingBottom: Math.max(insets.bottom, 12) }]}>
-      <View style={styles.outerFrame}>
+    <View style={[styles.rootContainer, { paddingTop: Math.max(insets.top, 18) }]}>
+      <View style={[styles.outerFrame, styles.mainFrame]}>
         {/* HEADER */}
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.headerSavedButton} onPress={() => setShowCookbook(true)} activeOpacity={0.85}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-              <Text style={styles.headerIconText}>📖</Text>
-              <View style={styles.headerSavedCounter}>
-                <Text style={styles.headerSavedCounterText}>{savedRecipes.length}</Text>
-              </View>
-            </View>
-            <Text style={styles.headerButtonLabel}>
-              {lang === 'fa' ? 'دستورهای ذخیره‌شده' : 'Saved Recipes'}
+        <View style={styles.modernHeader}>
+          <View>
+            <Text style={styles.modernHeaderTitle}>سفره ایرانی</Text>
+            <Text style={styles.modernHeaderSub}>
+              {activeTab === 'home' && (lang === 'fa' ? 'خوش آمدید' : 'Persian Culinary Masterclass')}
+              {activeTab === 'search' && (lang === 'fa' ? 'جستجو' : 'Search')}
+              {activeTab === 'wheel' && (lang === 'fa' ? 'گردونه سفره' : 'The Dial')}
+              {activeTab === 'profile' && (lang === 'fa' ? 'پروفایل' : 'Profile')}
             </Text>
-          </TouchableOpacity>
-
-          <View style={styles.headerCenter}>
-            <Text style={styles.headerTitle}>سفره ایرانی</Text>
-            <Text style={styles.headerSub}>
-              {lang === 'fa' ? 'دانشنامه و میزبان هنر آشپزی کهن' : 'Persian Culinary Masterclass'}
-            </Text>
-
-            <View style={styles.langPillContainer}>
-              <TouchableOpacity
-                style={[styles.langPill, lang === 'en' && styles.langPillActive]}
-                onPress={() => setLang('en')}
-              >
-                <Text style={[styles.langPillText, lang === 'en' && styles.langPillTextActive]}>English</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.langPill, lang === 'fa' && styles.langPillActive]}
-                onPress={() => setLang('fa')}
-              >
-                <Text style={[styles.langPillText, lang === 'fa' && styles.langPillTextActive]}>فارسی</Text>
-              </TouchableOpacity>
-            </View>
           </View>
-
-          <TouchableOpacity style={styles.headerIconButton} onPress={() => setShowSettings(true)}>
-            <Text style={styles.headerIconText}>⚙️</Text>
-            <Text style={styles.headerSettingsLabel}>{lang === 'fa' ? 'تنظیمات' : 'Settings'}</Text>
-          </TouchableOpacity>
+          <View style={styles.langPillContainer}>
+            <TouchableOpacity
+              style={[styles.langPill, lang === 'en' && styles.langPillActive]}
+              onPress={() => setLang('en')}
+            >
+              <Text style={[styles.langPillText, lang === 'en' && styles.langPillTextActive]}>English</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.langPill, lang === 'fa' && styles.langPillActive]}
+              onPress={() => setLang('fa')}
+            >
+              <Text style={[styles.langPillText, lang === 'fa' && styles.langPillTextActive]}>فارسی</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* INSTANT REAL-TIME SEARCH BAR */}
+        {activeTab === 'search' && (
         <View style={styles.searchBarContainer}>
           <Text style={styles.searchIcon}>🔍</Text>
           <TextInput
+            ref={searchInputRef}
             style={[styles.searchInput, isRTL && { textAlign: 'right' }]}
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -1616,19 +1629,22 @@ Follow the required tags and 4-part skeleton:
             </TouchableOpacity>
           )}
         </View>
+        )}
 
-        {/* CONDITIONAL RENDER: SEARCH RESULTS LIST VS MAIN WHEEL DIAL */}
-        {searchQuery.trim().length > 0 ? (
+        {/* CONDITIONAL RENDER PER ACTIVE TAB */}
+        {activeTab === 'search' ? (
           <View style={styles.searchResultsWrapper}>
             <View style={styles.searchResultsHeaderRow}>
               <Text style={styles.searchResultsCountText}>
-                {lang === 'fa'
+                {searchQuery.trim().length === 0
+                  ? (lang === 'fa' ? 'نام غذا یا خورشت را بنویسید' : 'Type a dish or stew name to begin')
+                  : lang === 'fa'
                   ? `${filteredSearchResults.length} نتیجه برای «${searchQuery}»:`
                   : `${filteredSearchResults.length} matches found:`}
               </Text>
             </View>
-            <ScrollView style={styles.searchResultsScroll} contentContainerStyle={{ paddingBottom: 20 }}>
-              {filteredSearchResults.length === 0 ? (
+            <ScrollView style={styles.searchResultsScroll} contentContainerStyle={{ paddingBottom: 20 }} keyboardShouldPersistTaps="handled">
+              {searchQuery.trim().length === 0 ? null : filteredSearchResults.length === 0 ? (
                 <View style={styles.searchEmptyBox}>
                   <Text style={styles.searchEmptyText}>
                     {lang === 'fa'
@@ -1662,92 +1678,26 @@ Follow the required tags and 4-part skeleton:
               )}
             </ScrollView>
           </View>
-        ) : (
-          <View style={{ flex: 1, width: '100%' }}>
-            {/* TIME-OF-DAY CONTEXTUAL MEAL BAR */}
-            <TouchableOpacity style={styles.timeOfDayBanner} activeOpacity={0.85} onPress={handleTimeOfDayClick}>
-              <Text style={styles.timeOfDayIcon}>{timeMeal.icon}</Text>
-              <View style={{ flex: 1, paddingHorizontal: 6 }}>
-                <Text style={styles.timeOfDayTitle}>
-                  {lang === 'fa' ? timeMeal.labelFa : timeMeal.labelEn}
-                </Text>
-                <Text style={styles.timeOfDaySub}>
-                  {lang === 'fa' ? `پیشنهاد سرآشپز: ${timeMeal.dishFa}` : `Chef Suggestion: ${timeMeal.dishEn}`}
-                </Text>
-              </View>
-              <View style={styles.timeOfDayActionBtn}>
-                <Text style={styles.timeOfDayActionText}>{lang === 'fa' ? 'دستور پخت' : 'Cook'}</Text>
-              </View>
-            </TouchableOpacity>
+        ) : activeTab === 'wheel' ? (
+          <View style={{ flex: 1, width: '100%', justifyContent: 'center', alignItems: 'center' }}>
+            <View style={[styles.cornerLogoBadge, styles.centeredLogoBadge, { width: dial.badgeW * 1.4, height: dial.badgeH * 1.4 }]}>
+              <Image
+                source={require('./assets/moghimi_logo.jpg')}
+                style={styles.cornerLogoImage}
+                resizeMode="contain"
+              />
+            </View>
 
-            {/* DIAL VIEWPORT WITH INSET CORNER BADGES & EXPANDED REGIONAL BUTTON */}
-            <View style={[styles.dialViewport, { flex: 1, marginVertical: 4 }]}>
-              {/* TOP-LEFT CORNER: MOGHIMI LOGO EMBEDDED INSET CLEAR OF BORDER LINES */}
-              <View style={[styles.cornerBadge, styles.cornerTopLeft, styles.cornerLogoBadge]}>
-                <Image
-                  source={require('./assets/moghimi_logo.jpg')}
-                  style={styles.cornerLogoImage}
-                  resizeMode="contain"
-                />
-              </View>
-
-              {/* TOP-RIGHT CORNER: BUTLER (میزبان) INSET */}
-              <TouchableOpacity
-                style={[styles.cornerBadge, styles.cornerTopRight, styles.cornerActionBadge]}
-                onPress={() => setShowButler(true)}
-                activeOpacity={0.85}
-              >
-                <Text style={styles.cornerActionIcon}>🤵</Text>
-                <Text style={styles.cornerActionTitle}>{lang === 'fa' ? 'میزبان درباری' : 'Butler'}</Text>
-                <Text style={styles.cornerActionSub}>{lang === 'fa' ? 'طراحی ضیافت' : 'Banquet'}</Text>
-              </TouchableOpacity>
-
-              {/* BOTTOM-LEFT CORNER: WHAT TO COOK? (چی بپزم؟) INSET */}
-              <TouchableOpacity
-                style={[styles.cornerBadge, styles.cornerBottomLeft, styles.cornerActionBadge]}
-                onPress={handleQuickSurpriseDish}
-                activeOpacity={0.85}
-              >
-                <Text style={styles.cornerActionIcon}>🎲</Text>
-                <Text style={styles.cornerActionTitle}>{lang === 'fa' ? 'چی بپزم؟' : 'What To Cook'}</Text>
-                <Text style={styles.cornerActionSub}>{lang === 'fa' ? 'پیشنهاد آنی' : 'Surprise'}</Text>
-              </TouchableOpacity>
-
-              {/* BOTTOM-CENTER: REGIONAL CUISINE BUTTON (ANCHORED BETWEEN WHAT TO COOK & TEMPERAMENT) */}
-              <TouchableOpacity
-                style={styles.regionalCenterBadge}
-                onPress={() => setShowRegionalModal(true)}
-                activeOpacity={0.85}
-              >
-                <Text style={styles.regionalBadgeIcon}>📍</Text>
-                <Text style={styles.regionalBadgeTitle}>
-                  {lang === 'fa' ? 'غذاهای استانی' : 'Regional Foods'}
-                </Text>
-                <Text style={styles.regionalBadgeSub}>
-                  {lang === 'fa' ? 'رشت، تبریز، اصفهان...' : 'Rasht, Tabriz...'}
-                </Text>
-              </TouchableOpacity>
-
-              {/* BOTTOM-RIGHT CORNER: TEMPERAMENT BALANCE (طبع و مزاج) INSET */}
-              <TouchableOpacity
-                style={[styles.cornerBadge, styles.cornerBottomRight, styles.cornerActionBadge]}
-                onPress={() => setShowTemperamentInfo(true)}
-                activeOpacity={0.85}
-              >
-                <Text style={styles.cornerActionIcon}>⚖️</Text>
-                <Text style={styles.cornerActionTitle}>{lang === 'fa' ? 'طبع و مزاج' : 'Temperament'}</Text>
-                <Text style={styles.cornerActionSub}>{lang === 'fa' ? 'مصلحات سنتی' : 'Harmony'}</Text>
-              </TouchableOpacity>
-
+            <View style={[styles.dialViewport, wheelStyles.viewport, { marginVertical: 4, alignSelf: 'center' }]}>
               {/* Concentric Persian Miniature Dial */}
-              <View style={styles.dialContainer}>
+              <View style={[styles.dialContainer, wheelStyles.container]}>
                 <ImageBackground
                   source={require('./assets/persian_wheel.jpg')}
-                  style={styles.wheelBackground}
-                  imageStyle={styles.wheelImageStyle}
+                  style={[styles.wheelBackground, wheelStyles.background]}
+                  imageStyle={[styles.wheelImageStyle, wheelStyles.image]}
                 >
                   {/* CENTER MEDALLION: IRAN MAP COVERS ENTIRE CIRCLE */}
-                  <View style={styles.centerMedallionContainer}>
+                  <View style={[styles.centerMedallionContainer, wheelStyles.medallion]}>
                     <Image
                       source={require('./assets/iran_map.jpg')}
                       style={styles.centerMedallionImage}
@@ -1760,14 +1710,14 @@ Follow the required tags and 4-part skeleton:
                     const stepAngle = 360 / OUTER_CATEGORIES.length;
                     const angle = (index * stepAngle - 90) * (Math.PI / 180);
                     const isMagnified = magnifiedId === cat.id;
-                    const circleDiameter = 48;
-                    const x = CENTER_X + OUTER_RADIUS * Math.cos(angle) - circleDiameter / 2;
-                    const y = CENTER_Y + OUTER_RADIUS * Math.sin(angle) - circleDiameter / 2;
+                    const circleDiameter = dial.outerDiameter;
+                    const x = dial.center + dial.outerRadius * Math.cos(angle) - circleDiameter / 2;
+                    const y = dial.center + dial.outerRadius * Math.sin(angle) - circleDiameter / 2;
 
                     return (
                       <TouchableOpacity
                         key={cat.id}
-                        style={[styles.outerCircle, { left: x, top: y }, isMagnified && styles.circleMagnified]}
+                        style={[styles.outerCircle, circleBox(circleDiameter), { left: x, top: y }, isMagnified && styles.circleMagnified]}
                         activeOpacity={0.9}
                         delayLongPress={200}
                         onPressIn={() => setMagnifiedId(cat.id)}
@@ -1792,14 +1742,14 @@ Follow the required tags and 4-part skeleton:
                     const stepAngle = 360 / INNER_CATEGORIES.length;
                     const angle = (index * stepAngle - 90) * (Math.PI / 180);
                     const isMagnified = magnifiedId === cat.id;
-                    const circleDiameter = 38;
-                    const x = CENTER_X + INNER_RADIUS * Math.cos(angle) - circleDiameter / 2;
-                    const y = CENTER_Y + INNER_RADIUS * Math.sin(angle) - circleDiameter / 2;
+                    const circleDiameter = dial.innerDiameter;
+                    const x = dial.center + dial.innerRadius * Math.cos(angle) - circleDiameter / 2;
+                    const y = dial.center + dial.innerRadius * Math.sin(angle) - circleDiameter / 2;
 
                     return (
                       <TouchableOpacity
                         key={cat.id}
-                        style={[styles.innerCircle, { left: x, top: y }, isMagnified && styles.circleMagnifiedInner]}
+                        style={[styles.innerCircle, circleBox(circleDiameter), { left: x, top: y }, isMagnified && styles.circleMagnifiedInner]}
                         activeOpacity={0.9}
                         delayLongPress={200}
                         onPressIn={() => setMagnifiedId(cat.id)}
@@ -1830,13 +1780,135 @@ Follow the required tags and 4-part skeleton:
               </Text>
             </TouchableOpacity>
           </View>
-        )}
+        ) : activeTab === 'home' ? (
+          <ScrollView style={{ flex: 1, width: '100%' }} contentContainerStyle={styles.homeScrollContent} showsVerticalScrollIndicator={false}>
+            <TouchableOpacity style={styles.heroCard} activeOpacity={0.9} onPress={handleTimeOfDayClick}>
+              <Text style={styles.heroEyebrow}>{lang === 'fa' ? timeMeal.labelFa : timeMeal.labelEn}</Text>
+              <Text style={styles.heroTitle}>{lang === 'fa' ? timeMeal.dishFa : timeMeal.dishEn}</Text>
+              <View style={styles.heroFooterRow}>
+                <Text style={styles.heroIcon}>{timeMeal.icon}</Text>
+                <View style={styles.heroCta}>
+                  <Text style={styles.heroCtaText}>{lang === 'fa' ? 'دستور پخت' : 'Cook this'}</Text>
+                </View>
+              </View>
+            </TouchableOpacity>
 
-        <Text style={styles.footerInstruction}>
-          {lang === 'fa'
-            ? 'برای مطالعه بهتر انگشت را نگه‌دارید • برای ورود به منو ضربه بزنید'
-            : 'Hold finger on circle to magnify • Tap item to view dishes'}
-        </Text>
+            <View style={styles.quickRow}>
+              <TouchableOpacity style={styles.quickCard} activeOpacity={0.85} onPress={handleQuickSurpriseDish}>
+                <Text style={styles.quickIcon}>🎲</Text>
+                <Text style={styles.quickTitle}>{lang === 'fa' ? 'چی بپزم؟' : 'Surprise me'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.quickCard} activeOpacity={0.85} onPress={() => setShowRegionalModal(true)}>
+                <Text style={styles.quickIcon}>📍</Text>
+                <Text style={styles.quickTitle}>{lang === 'fa' ? 'غذاهای استانی' : 'Regional'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.quickCard} activeOpacity={0.85} onPress={() => setShowTemperamentInfo(true)}>
+                <Text style={styles.quickIcon}>⚖️</Text>
+                <Text style={styles.quickTitle}>{lang === 'fa' ? 'طبع و مزاج' : 'Temperament'}</Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.sectionHeading}>{lang === 'fa' ? 'دسته‌بندی‌ها' : 'Browse categories'}</Text>
+            <View style={styles.categoryGrid}>
+              {OUTER_CATEGORIES.concat(INNER_CATEGORIES).map((cat) => (
+                <TouchableOpacity
+                  key={cat.id}
+                  style={styles.categoryTile}
+                  activeOpacity={0.85}
+                  onPress={() => {
+                    setSelectedCategory(cat);
+                    setSubModalMode('dial');
+                  }}
+                >
+                  <Text style={styles.categoryTileIcon}>{cat.icon}</Text>
+                  <Text style={styles.categoryTileTitle} numberOfLines={2}>
+                    {(lang === 'fa' ? cat.titleFa : cat.titleEn).replace('\n', ' ')}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </ScrollView>
+        ) : activeTab === 'profile' ? (
+          <ScrollView style={{ flex: 1, width: '100%' }} contentContainerStyle={styles.homeScrollContent} showsVerticalScrollIndicator={false}>
+            <View style={styles.profileHeader}>
+              <View style={styles.profileAvatar}>
+                <Text style={styles.profileAvatarText}>👨‍🍳</Text>
+              </View>
+              <Text style={styles.profileName}>{lang === 'fa' ? 'سرآشپز من' : 'My Kitchen'}</Text>
+              <Text style={styles.profileStat}>
+                {savedRecipes.length} {lang === 'fa' ? 'دستور ذخیره‌شده' : 'saved recipes'}
+              </Text>
+            </View>
+
+            <TouchableOpacity style={styles.profileRow} activeOpacity={0.85} onPress={() => setShowCookbook(true)}>
+              <Text style={styles.profileRowIcon}>📖</Text>
+              <Text style={styles.profileRowText}>{lang === 'fa' ? 'دستورهای ذخیره‌شده' : 'Saved Recipes'}</Text>
+              <Text style={styles.profileRowChevron}>›</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.profileRow} activeOpacity={0.85} onPress={() => setShowSettings(true)}>
+              <Text style={styles.profileRowIcon}>⚙️</Text>
+              <Text style={styles.profileRowText}>{lang === 'fa' ? 'تنظیمات' : 'Settings'}</Text>
+              <Text style={styles.profileRowChevron}>›</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.profileRow} activeOpacity={0.85} onPress={() => setShowUserGuide(true)}>
+              <Text style={styles.profileRowIcon}>📘</Text>
+              <Text style={styles.profileRowText}>{lang === 'fa' ? 'راهنمای استفاده و امکانات' : 'User Guide & Features'}</Text>
+              <Text style={styles.profileRowChevron}>›</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        ) : null}
+
+        {activeTab === 'wheel' && (
+          <Text style={styles.footerInstruction}>
+            {lang === 'fa'
+              ? 'برای مطالعه بهتر انگشت را نگه‌دارید • برای ورود به منو ضربه بزنید'
+              : 'Hold finger on circle to magnify • Tap item to view dishes'}
+          </Text>
+        )}
+      </View>
+
+      {/* BOTTOM TAB BAR */}
+      <View
+        style={[styles.tabBar, { paddingBottom: Math.max(insets.bottom, 8) }]}
+        onLayout={(e) => setTabBarHeight(e.nativeEvent.layout.height)}
+      >
+        {([
+          { key: 'home', icon: '🏠', en: 'Home', fa: 'خانه' },
+          { key: 'search', icon: '🔍', en: 'Search', fa: 'جستجو' },
+          { key: 'wheel', icon: '☸️', en: 'Dial', fa: 'گردونه' },
+          { key: 'butler', icon: '🤵', en: 'Butler', fa: 'میزبان' },
+          { key: 'profile', icon: '👤', en: 'Profile', fa: 'پروفایل' },
+        ] as const).map((tab) => {
+          const isCenter = tab.key === 'wheel';
+          const isActive = activeTab === tab.key;
+          return (
+            <TouchableOpacity
+              key={tab.key}
+              style={styles.tabItem}
+              activeOpacity={0.8}
+              onPress={() => {
+                if (tab.key === 'search' && activeTab === 'search') {
+                  searchInputRef.current?.focus();
+                  return;
+                }
+                if (activeTab === 'butler' && tab.key !== 'butler') stopActiveSpeech();
+                Keyboard.dismiss();
+                setActiveTab(tab.key);
+              }}
+            >
+              {isCenter ? (
+                <View style={[styles.tabCenterButton, isActive && styles.tabCenterButtonActive]}>
+                  <Text style={styles.tabCenterIcon}>{tab.icon}</Text>
+                </View>
+              ) : (
+                <View style={[styles.tabIconPill, isActive && styles.tabIconPillActive]}>
+                  <Text style={[styles.tabIcon, !isActive && styles.tabIconInactive]}>{tab.icon}</Text>
+                </View>
+              )}
+              <Text style={[styles.tabLabel, isActive && styles.tabLabelActive]}>{lang === 'fa' ? tab.fa : tab.en}</Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
 
       {/* REGIONAL CUISINE MODAL */}
@@ -1990,7 +2062,7 @@ Follow the required tags and 4-part skeleton:
                       setSelectedCategory(null);
                       setActiveDish(null);
                     }}
-                    style={styles.backButton}
+                    style={[styles.backButton, wheelStyles.headerSide]}
                   >
                     <Text style={styles.backButtonText}>‹ {lang === 'fa' ? 'صفحه اصلی' : 'Home'}</Text>
                   </TouchableOpacity>
@@ -2000,17 +2072,17 @@ Follow the required tags and 4-part skeleton:
                       {lang === 'fa' ? selectedCategory?.titleFa : selectedCategory?.titleEn.replace('\n', ' ')}
                     </Text>
                   </View>
-                  <View style={{ width: 60 }} />
+                  <View style={wheelStyles.headerSide} />
                 </View>
 
-                <View style={[styles.dialViewport, { marginTop: 20, alignSelf: 'center' }]}>
-                  <View style={styles.dialContainer}>
+                <View style={[styles.dialViewport, wheelStyles.viewport, { marginTop: 20, alignSelf: 'center' }]}>
+                  <View style={[styles.dialContainer, wheelStyles.container]}>
                     <ImageBackground
                       source={require('./assets/persian_wheel.jpg')}
-                      style={styles.wheelBackground}
-                      imageStyle={styles.wheelImageStyle}
+                      style={[styles.wheelBackground, wheelStyles.background]}
+                      imageStyle={[styles.wheelImageStyle, wheelStyles.image]}
                     >
-                      <View style={styles.centerMedallionContainer}>
+                      <View style={[styles.centerMedallionContainer, wheelStyles.medallion]}>
                         <Image
                           source={require('./assets/iran_map.jpg')}
                           style={styles.centerMedallionImage}
@@ -2022,17 +2094,18 @@ Follow the required tags and 4-part skeleton:
                         const total = selectedCategory.dishesEn.length;
                         const stepAngle = 360 / total;
                         const angle = (index * stepAngle - 90) * (Math.PI / 180);
-                        const subRadius = WHEEL_SIZE / 2 - 44;
+                        const subRadius = dial.subRadius;
                         const isDishMagnified = magnifiedId === dish;
-                        const circleSize = 68;
-                        const x = CENTER_X + subRadius * Math.cos(angle) - circleSize / 2;
-                        const y = CENTER_Y + subRadius * Math.sin(angle) - circleSize / 2;
+                        const circleSize = dial.subDiameter;
+                        const x = dial.center + subRadius * Math.cos(angle) - circleSize / 2;
+                        const y = dial.center + subRadius * Math.sin(angle) - circleSize / 2;
 
                         return (
                           <TouchableOpacity
                             key={dish}
                             style={[
                               styles.subDishCircle,
+                              circleBox(circleSize),
                               { left: x, top: y },
                               isDishMagnified && styles.subDishMagnified,
                             ]}
@@ -2252,13 +2325,13 @@ Follow the required tags and 4-part skeleton:
         </View>
       </Modal>
 
-      {/* PERSIAN DINING BUTLER MODAL (WITH SEGMENTED TABBED RECIPES) */}
-      <Modal visible={showButler} animationType="slide" transparent={true} onRequestClose={() => {
-        stopActiveSpeech();
-        setShowButler(false);
-      }}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.heritageModalOverlay}>
-          <View style={styles.butlerCard}>
+      {/* PERSIAN DINING BUTLER TAB (WITH SEGMENTED TABBED RECIPES) */}
+      {activeTab === 'butler' && (
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={[styles.butlerTabContainer, { paddingTop: Math.max(insets.top, 18) + 4, bottom: tabBarHeight + TAB_CENTER_OVERHANG }]}
+        >
+          <View style={[styles.butlerCard, styles.butlerCardTab]}>
             <View style={styles.heritageHeaderRow}>
               <Text style={styles.heritageIconLarge}>🤵</Text>
               <View style={{ flex: 1, marginLeft: 10 }}>
@@ -2293,13 +2366,9 @@ Follow the required tags and 4-part skeleton:
                   thumbColor={isFusionEnabled ? '#f6d860' : '#94a3b8'}
                 />
               </View>
-
-              <TouchableOpacity onPress={() => setShowButler(false)} style={[styles.closeBadge, { marginLeft: 8 }]}>
-                <Text style={styles.closeBadgeText}>✕</Text>
-              </TouchableOpacity>
             </View>
 
-            <ScrollView ref={butlerScrollRef} style={{ maxHeight: 480, marginVertical: 10 }} showsVerticalScrollIndicator={true}>
+            <ScrollView ref={butlerScrollRef} style={{ flex: 1, marginVertical: 10 }} showsVerticalScrollIndicator={true} keyboardShouldPersistTaps="handled">
               {isFusionEnabled && (
                 <View style={styles.cuisineSelectorCard}>
                   <Text style={styles.cuisineSelectorHeading}>
@@ -2455,7 +2524,7 @@ Follow the required tags and 4-part skeleton:
             </ScrollView>
           </View>
         </KeyboardAvoidingView>
-      </Modal>
+      )}
 
       {/* SETTINGS MODAL */}
       <Modal visible={showSettings} animationType="slide" transparent={true} onRequestClose={() => setShowSettings(false)}>
@@ -2536,11 +2605,11 @@ Follow the required tags and 4-part skeleton:
         <View style={[styles.rootContainer, { paddingTop: Math.max(insets.top, 18), paddingBottom: Math.max(insets.bottom, 12) }]}>
           <View style={styles.outerFrame}>
             <View style={styles.header}>
-              <TouchableOpacity onPress={() => setShowCookbook(false)} style={styles.backButton}>
+              <TouchableOpacity onPress={() => setShowCookbook(false)}               style={[styles.backButton, wheelStyles.headerSide]}>
                 <Text style={styles.backButtonText}>‹ {lang === 'fa' ? 'بازگشت' : 'Back'}</Text>
               </TouchableOpacity>
               <Text style={styles.headerTitle}>{lang === 'fa' ? 'کتابچه آفلاین شما' : 'Saved Recipes'}</Text>
-              <View style={{ width: 50 }} />
+                            <View style={wheelStyles.headerSide} />
             </View>
 
             <ScrollView style={styles.recipeScroll} contentContainerStyle={styles.recipeContent}>
@@ -2635,7 +2704,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    minWidth: 54,
+    width: 76,
   },
   headerSavedCounter: {
     backgroundColor: '#0c1b33',
@@ -2656,7 +2725,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    minWidth: 44,
+    width: 76,
   },
   headerIconText: {
     fontSize: 13,
@@ -2850,8 +2919,8 @@ const styles = StyleSheet.create({
     color: '#0c1b33',
   },
   backButton: {
-    paddingHorizontal: 8,
     paddingVertical: 4,
+    alignItems: 'flex-start',
   },
   backButtonText: {
     color: '#f6d860',
@@ -2859,8 +2928,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   dialViewport: {
-    width: WHEEL_SIZE,
-    height: WHEEL_SIZE,
     position: 'relative',
     alignItems: 'center',
     justifyContent: 'center',
@@ -2892,6 +2959,19 @@ const styles = StyleSheet.create({
   cornerLogoImage: {
     width: '100%',
     height: '100%',
+  },
+  centeredLogoBadge: {
+    borderRadius: 12,
+    marginBottom: 14,
+  },
+  butlerTabContainer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    backgroundColor: '#070f1e',
+    paddingHorizontal: 14,
+    paddingBottom: 8,
   },
   cornerActionBadge: {
     backgroundColor: 'rgba(16, 36, 68, 0.96)',
@@ -2943,20 +3023,15 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   dialContainer: {
-    width: WHEEL_SIZE,
-    height: WHEEL_SIZE,
     alignItems: 'center',
     justifyContent: 'center',
   },
   wheelBackground: {
-    width: WHEEL_SIZE,
-    height: WHEEL_SIZE,
     position: 'relative',
     alignItems: 'center',
     justifyContent: 'center',
   },
   wheelImageStyle: {
-    borderRadius: WHEEL_SIZE / 2,
     borderWidth: 2.5,
     borderColor: '#d4af37',
   },
@@ -3048,6 +3123,133 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     paddingBottom: 2,
   },
+  mainFrame: {
+    marginHorizontal: 0,
+    borderWidth: 0,
+    borderRadius: 0,
+    paddingHorizontal: 14,
+    justifyContent: 'flex-start',
+    backgroundColor: '#070f1e',
+  },
+  modernHeader: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+  },
+  modernHeaderTitle: { fontSize: 24, fontWeight: '900', color: '#f6d860' },
+  modernHeaderSub: { fontSize: 12, color: '#94a3b8', marginTop: 2 },
+  homeScrollContent: { paddingBottom: 24 },
+  heroCard: {
+    backgroundColor: '#12305c',
+    borderRadius: 20,
+    padding: 18,
+    marginTop: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(246, 216, 96, 0.35)',
+  },
+  heroEyebrow: { color: '#f6d860', fontSize: 12, fontWeight: '800', letterSpacing: 0.8, textTransform: 'uppercase' },
+  heroTitle: { color: '#ffffff', fontSize: 24, fontWeight: '900', marginTop: 6 },
+  heroFooterRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 16 },
+  heroIcon: { fontSize: 36 },
+  heroCta: { backgroundColor: '#f6d860', borderRadius: 20, paddingHorizontal: 18, paddingVertical: 9 },
+  heroCtaText: { color: '#0c1b33', fontWeight: '900', fontSize: 13 },
+  quickRow: { flexDirection: 'row', gap: 10, marginTop: 14 },
+  quickCard: {
+    flex: 1,
+    backgroundColor: '#0f2240',
+    borderRadius: 16,
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.18)',
+  },
+  quickIcon: { fontSize: 22 },
+  quickTitle: { color: '#e2e8f0', fontSize: 11.5, fontWeight: '700', marginTop: 6, textAlign: 'center' },
+  sectionHeading: { color: '#ffffff', fontSize: 17, fontWeight: '800', marginTop: 22, marginBottom: 10 },
+  categoryGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 10 },
+  categoryTile: {
+    width: '48%',
+    backgroundColor: '#0f2240',
+    borderRadius: 16,
+    padding: 14,
+    minHeight: 84,
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.18)',
+  },
+  categoryTileIcon: { fontSize: 26 },
+  categoryTileTitle: { color: '#f1f5f9', fontSize: 13, fontWeight: '700', marginTop: 8 },
+  profileHeader: { alignItems: 'center', paddingVertical: 20 },
+  profileAvatar: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: '#12305c',
+    borderWidth: 2,
+    borderColor: '#f6d860',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  profileAvatarText: { fontSize: 42 },
+  profileName: { color: '#ffffff', fontSize: 20, fontWeight: '900', marginTop: 12 },
+  profileStat: { color: '#94a3b8', fontSize: 13, marginTop: 4 },
+  profileRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0f2240',
+    borderRadius: 14,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    marginBottom: 10,
+  },
+  profileRowIcon: { fontSize: 20, width: 34 },
+  profileRowText: { flex: 1, color: '#f1f5f9', fontSize: 15, fontWeight: '700' },
+  profileRowChevron: { color: '#94a3b8', fontSize: 22 },
+  tabBar: {
+    zIndex: 20,
+    elevation: 20,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    backgroundColor: '#0a1628',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(148, 163, 184, 0.3)',
+    paddingTop: 8,
+  },
+  tabItem: { flex: 1, alignItems: 'center', justifyContent: 'flex-end' },
+  tabIcon: { fontSize: 22 },
+  tabIconInactive: { opacity: 0.45 },
+  tabIconPill: {
+    paddingHorizontal: 18,
+    paddingVertical: 4,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  tabIconPillActive: {
+    backgroundColor: 'rgba(246, 216, 96, 0.2)',
+    borderColor: 'rgba(246, 216, 96, 0.7)',
+  },
+  tabLabel: { fontSize: 10.5, color: '#64748b', marginTop: 3, fontWeight: '600' },
+  tabLabelActive: { color: '#f6d860', fontWeight: '900' },
+  tabCenterButton: {
+    width: 62,
+    height: 62,
+    borderRadius: 31,
+    marginTop: -26,
+    backgroundColor: '#c59b27',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 4,
+    borderColor: '#0a1628',
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+  },
+  tabCenterButtonActive: { backgroundColor: '#f6d860', borderColor: '#ffffff', transform: [{ scale: 1.08 }] },
+  tabCenterIcon: { fontSize: 30 },
   heritageModalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.8)',
@@ -3196,6 +3398,10 @@ const styles = StyleSheet.create({
     borderWidth: 2.5,
     borderColor: '#f6d860',
     padding: 16,
+  },
+  butlerCardTab: {
+    flex: 1,
+    borderWidth: 1.5,
   },
   fusionSwitchContainer: {
     alignItems: 'center',
@@ -3381,6 +3587,146 @@ const styles = StyleSheet.create({
     padding: 10,
     paddingBottom: 40,
   },
+  chipRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
+  infoChip: {
+    flex: 1,
+    backgroundColor: '#0f2240',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.2)',
+    paddingVertical: 9,
+    paddingHorizontal: 10,
+  },
+  infoChipLabel: { fontSize: 10.5, color: '#94a3b8', fontWeight: '700' },
+  infoChipValue: { fontSize: 12.5, color: '#f1f5f9', fontWeight: '800', marginTop: 2 },
+  macroCard: {
+    flexDirection: 'row',
+    backgroundColor: '#0f2240',
+    borderRadius: 16,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.2)',
+  },
+  macroCol: { flex: 1, alignItems: 'center', paddingHorizontal: 4 },
+  macroColDivider: { borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: 'rgba(148, 163, 184, 0.35)' },
+  macroBigValue: { fontSize: 17, fontWeight: '900', color: '#f6d860' },
+  macroSmallLabel: { fontSize: 10.5, color: '#94a3b8', fontWeight: '700', marginTop: 3 },
+  macroCaption: { fontSize: 11, color: '#94a3b8', textAlign: 'center', marginTop: 6, marginBottom: 12 },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 7,
+    borderWidth: 2,
+    borderColor: '#64748b',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+    marginLeft: 0,
+  },
+  checkboxOn: { backgroundColor: '#f6d860', borderColor: '#f6d860' },
+  checkboxTick: { color: '#0c1b33', fontWeight: '900', fontSize: 14, lineHeight: 16 },
+  ingredientRowDone: { opacity: 0.55 },
+  ingredientTextDone: { textDecorationLine: 'line-through' },
+  recipeTabBarContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#0f2240',
+    borderRadius: 14,
+    padding: 4,
+    marginBottom: 12,
+    gap: 4,
+  },
+  recipeTabBtn: {
+    flex: 1,
+    paddingVertical: 9,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+  },
+  recipeTabBtnActive: {
+    backgroundColor: '#f6d860',
+  },
+  recipeTabBtnText: {
+    fontSize: 11.5,
+    fontWeight: '700',
+    color: '#94a3b8',
+    textAlign: 'center',
+  },
+  recipeTabBtnTextActive: {
+    color: '#0c1b33',
+    fontWeight: '900',
+  },
+  recipeSectionBlock: {
+    backgroundColor: '#0f2240',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.2)',
+    padding: 16,
+    marginBottom: 10,
+  },
+  sectionHeaderFlex: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingBottom: 8,
+    marginBottom: 10,
+  },
+  recipeSectionHeading: {
+    fontSize: 17,
+    fontWeight: '900',
+    color: '#ffffff',
+    flex: 1,
+  },
+  miniAudioBtn: {
+    backgroundColor: 'rgba(246, 216, 96, 0.15)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  miniAudioBtnActive: {
+    backgroundColor: '#ef4444',
+  },
+  ingredientRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0a1a33',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+  },
+  voiceStepToolbar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#0a1a33',
+    borderRadius: 14,
+    padding: 8,
+    marginBottom: 12,
+  },
+  stepControlBtn: {
+    backgroundColor: '#12305c',
+    borderRadius: 14,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+  },
+  stepCardRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: '#0a1a33',
+    borderWidth: 1,
+    borderColor: 'transparent',
+    borderRadius: 14,
+    padding: 14,
+    gap: 12,
+  },
+  stepNumberBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#f6d860',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   recipeMetaTopRow: {
     flexDirection: 'row',
     gap: 8,
@@ -3467,73 +3813,6 @@ const styles = StyleSheet.create({
     color: '#f6d860',
     marginTop: 1,
   },
-  recipeTabBarContainer: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(15, 23, 42, 0.95)',
-    borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: '#c59b27',
-    padding: 4,
-    marginBottom: 10,
-    gap: 4,
-  },
-  recipeTabBtn: {
-    flex: 1,
-    paddingVertical: 8,
-    borderRadius: 6,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'transparent',
-  },
-  recipeTabBtnActive: {
-    backgroundColor: '#c59b27',
-  },
-  recipeTabBtnText: {
-    fontSize: 9.5,
-    fontWeight: '800',
-    color: '#cbd5e1',
-    textAlign: 'center',
-  },
-  recipeTabBtnTextActive: {
-    color: '#0c1b33',
-    fontWeight: '900',
-  },
-  recipeSectionBlock: {
-    backgroundColor: 'rgba(15, 23, 42, 0.85)',
-    borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: '#c59b27',
-    padding: 14,
-    marginBottom: 10,
-  },
-  sectionHeaderFlex: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    borderBottomWidth: 1.5,
-    borderBottomColor: 'rgba(197, 155, 39, 0.4)',
-    paddingBottom: 6,
-    marginBottom: 8,
-  },
-  recipeSectionHeading: {
-    fontSize: 16.5,
-    fontWeight: '900',
-    color: '#f6d860',
-    letterSpacing: 0.5,
-    flex: 1,
-  },
-  miniAudioBtn: {
-    backgroundColor: '#78350f',
-    borderWidth: 1,
-    borderColor: '#f6d860',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  miniAudioBtnActive: {
-    backgroundColor: '#ef4444',
-    borderColor: '#ffffff',
-  },
   miniAudioText: {
     fontSize: 9.5,
     fontWeight: '800',
@@ -3546,15 +3825,6 @@ const styles = StyleSheet.create({
   },
   ingredientsGrid: {
     gap: 6,
-  },
-  ingredientRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: 'rgba(12, 27, 51, 0.7)',
-    borderRadius: 8,
-    padding: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(197, 155, 39, 0.25)',
   },
   ingredientRowRTL: {
     flexDirection: 'row-reverse',
@@ -3576,29 +3846,10 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     lineHeight: 20,
   },
-  voiceStepToolbar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: 'rgba(12, 27, 51, 0.9)',
-    borderWidth: 1,
-    borderColor: '#c59b27',
-    borderRadius: 8,
-    padding: 6,
-    marginBottom: 10,
-  },
   voiceStepLabel: {
     fontSize: 10.5,
     fontWeight: '800',
     color: '#fef08a',
-  },
-  stepControlBtn: {
-    backgroundColor: 'rgba(16, 36, 68, 0.95)',
-    borderWidth: 1,
-    borderColor: '#c59b27',
-    borderRadius: 6,
-    paddingVertical: 4,
-    paddingHorizontal: 8,
   },
   stepControlBtnHighlight: {
     backgroundColor: '#78350f',
@@ -3608,29 +3859,10 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#ffffff',
   },
-  stepCardRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: 'rgba(12, 27, 51, 0.75)',
-    borderWidth: 1,
-    borderColor: 'rgba(197, 155, 39, 0.25)',
-    borderRadius: 8,
-    padding: 10,
-    gap: 8,
-  },
   stepCardRowActive: {
     borderColor: '#f6d860',
     backgroundColor: 'rgba(120, 53, 15, 0.6)',
     borderWidth: 1.5,
-  },
-  stepNumberBadge: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: '#c59b27',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 1,
   },
   stepNumberText: {
     fontSize: 11,
