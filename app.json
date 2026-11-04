@@ -25,7 +25,8 @@
       "expo-sqlite",
       "expo-asset",
       "expo-sharing",
-      "expo-video"
+      "expo-video",
+      "expo-status-bar"
     ]
   }
 }
