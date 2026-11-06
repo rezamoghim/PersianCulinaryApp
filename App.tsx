@@ -63,7 +63,7 @@ type Language = 'en' | 'fa';
 type FusionCuisine = 'American' | 'Japanese' | 'Chinese' | 'Mexican';
 type RecipeTab = 'nature' | 'ingredients' | 'steps' | 'secrets';
 
-type CourseBucket = 'all' | 'appetizers' | 'mains' | 'sides' | 'desserts' | 'snacks' | 'drinks';
+type CourseBucket = 'appetizers' | 'mains' | 'sides' | 'desserts' | 'snacks' | 'drinks';
 
 interface CourseBucketMeta {
   id: CourseBucket;
@@ -74,8 +74,8 @@ interface CourseBucketMeta {
   subtitleFa: string;
 }
 
+// "All courses" removed; begins with Appetizers
 const COURSE_BUCKETS: CourseBucketMeta[] = [
-  { id: 'all', titleEn: 'All Courses', titleFa: 'همه منو', icon: '🍽️', subtitleEn: 'Complete Culinary Selection', subtitleFa: 'تمام بخش‌های سفره' },
   { id: 'appetizers', titleEn: 'Appetizers & Starters', titleFa: 'پیش‌غذا و اشتهاآور', icon: '🧆', subtitleEn: 'Warm Starters, Soups, Aush & Dolmeh', subtitleFa: 'آش، سوپ، کشک بادمجان، دلمه و کوفته' },
   { id: 'mains', titleEn: 'Main Dishes & Royal Rice', titleFa: 'غذاهای اصلی و چلو', icon: '🍲', subtitleEn: 'Slow-Cooked Stews, Basmati & Charcoal Kabobs', subtitleFa: 'خورشت‌های جاافتاده، کباب‌ها و پلوهای مجلسی' },
   { id: 'sides', titleEn: 'Sides, Relishes & Breads', titleFa: 'مخلفات، چاشنی و نان', icon: '🥗', subtitleEn: 'Boranis, Pickles, Fresh Herbs & Flatbreads', subtitleFa: 'سالادها، ترشیجات، بورانی و نان‌های سنتی' },
@@ -730,7 +730,6 @@ function RecipeTabbedDisplay({
 
   return (
     <View style={{ flex: 1 }}>
-      {/* Universal Floating Stop Button when audio is reading */}
       {isSpeaking && (
         <TouchableOpacity style={styles.floatingStopBar} onPress={onStopSpeech} activeOpacity={0.85}>
           <Text style={styles.floatingStopText}>⏹️ {lang === 'fa' ? 'توقف پخش صدا' : 'Stop Narration'}</Text>
@@ -864,7 +863,6 @@ function RecipeTabbedDisplay({
             )}
           </View>
 
-          {/* Voice Step Control Toolbar */}
           <View style={styles.voiceStepToolbar}>
             <Text style={styles.voiceStepLabel}>
               {lang === 'fa' ? 'دکمه‌های صوتی مراحل:' : 'Step Audio Assistant:'}
@@ -951,7 +949,9 @@ function PersianAppInner() {
   const dial = getDialMetrics(winWidth, winHeight);
   const [lang, setLang] = useState<Language>('en');
 
-  const [selectedBucket, setSelectedBucket] = useState<CourseBucket>('all');
+  // Active Menu Course Bucket filter (default: appetizers)
+  const [selectedBucket, setSelectedBucket] = useState<CourseBucket>('appetizers');
+
   const [selectedCategory, setSelectedCategory] = useState<CategoryData | null>(null);
   const [activeDish, setActiveDish] = useState<string | null>(null);
   const [recipeContent, setRecipeContent] = useState<string>('');
@@ -1016,9 +1016,6 @@ function PersianAppInner() {
   };
 
   const displayedCategories = useMemo(() => {
-    if (selectedBucket === 'all') {
-      return ALL_CATEGORIES;
-    }
     return ALL_CATEGORIES.filter((c) => c.bucket === selectedBucket);
   }, [selectedBucket]);
 
@@ -1052,7 +1049,6 @@ function PersianAppInner() {
     );
   }, [searchQuery, allDishesIndexed]);
 
-  // Explicit, non-repeating audio engine
   const speakSanitizedText = (text: string, sectionKey: string) => {
     Speech.stop();
     const cleanScript = cleanForSpeech(text);
@@ -1139,17 +1135,13 @@ Adhere strictly to the required tags and no asterisks:
     }
   };
 
-  // Wheel Spin Execution on selected course
   const triggerWheelSpinForCourse = (courseId: CourseBucket) => {
     setShowSurpriseModal(false);
     setSelectedBucket(courseId);
     setSpinResultDish(null);
     setIsSpinning(true);
 
-    const eligibleCategories = courseId === 'all'
-      ? ALL_CATEGORIES
-      : ALL_CATEGORIES.filter((c) => c.bucket === courseId);
-
+    const eligibleCategories = ALL_CATEGORIES.filter((c) => c.bucket === courseId);
     const targetCategory = eligibleCategories.length > 0
       ? eligibleCategories[Math.floor(Math.random() * eligibleCategories.length)]
       : ALL_CATEGORIES[0];
@@ -1177,7 +1169,6 @@ Adhere strictly to the required tags and no asterisks:
     }).start(() => {
       clearInterval(lightTimer);
       setIsSpinning(false);
-      // Presents confirmation modal with chosen dish (Ask Yes/No)
       setSpinResultDish({ dish: targetDish, category: targetCategory });
     });
   };
@@ -1191,9 +1182,7 @@ Adhere strictly to the required tags and no asterisks:
     setParsedButlerRecipe(null);
 
     const activeBucketMeta = COURSE_BUCKETS.find((b) => b.id === selectedBucket);
-    const bucketFocus = selectedBucket !== 'all'
-      ? `Focus strictly on course category: "${activeBucketMeta?.titleEn}" (${activeBucketMeta?.titleFa}).`
-      : 'Harmonious multi-course banquet design.';
+    const bucketFocus = `Focus strictly on course category: "${activeBucketMeta?.titleEn}" (${activeBucketMeta?.titleFa}).`;
 
     let prompt = '';
     if (isFusionEnabled) {
@@ -1394,7 +1383,7 @@ Follow the required tags and 4-part skeleton:
   return (
     <View style={[styles.rootContainer, { paddingTop: Math.max(insets.top, 14) }]}>
       <View style={[styles.outerFrame, styles.mainFrame]}>
-        {/* HEADER */}
+        {/* MODERN HEADER */}
         <View style={styles.modernHeader}>
           <View>
             <Text style={styles.modernHeaderTitle}>سفره ایرانی</Text>
@@ -1443,7 +1432,7 @@ Follow the required tags and 4-part skeleton:
           </View>
         )}
 
-        {/* TAB 1: HOME (RESTAURANT MENU BOOK STYLE WITH GOLD FRAMES) */}
+        {/* TAB 1: HOME (RESTAURANT MENU BOOK STYLE WITH COMPLETE DISH LISTINGS) */}
         {activeTab === 'home' ? (
           <ScrollView style={{ flex: 1, width: '100%' }} contentContainerStyle={styles.homeScrollContent} showsVerticalScrollIndicator={false}>
             {/* Crown Hero Dish */}
@@ -1481,12 +1470,12 @@ Follow the required tags and 4-part skeleton:
               </TouchableOpacity>
             </View>
 
-            {/* RESTAURANT MENU FOLIO BOOK */}
+            {/* RESTAURANT MENU FOLIO BOOK (ALL COMPLETE ITEMS LISTED) */}
             <Text style={styles.menuBookMainHeading}>
               {lang === 'fa' ? '📖 منوی تشریفاتی رستوران' : '📖 Restaurant Menu Folio'}
             </Text>
 
-            {COURSE_BUCKETS.filter((b) => b.id !== 'all').map((bucket) => {
+            {COURSE_BUCKETS.map((bucket) => {
               const bucketCategories = ALL_CATEGORIES.filter((c) => c.bucket === bucket.id);
               return (
                 <View key={bucket.id} style={styles.menuFolioCard}>
@@ -1516,49 +1505,58 @@ Follow the required tags and 4-part skeleton:
 
                   <View style={styles.menuFolioGoldDivider} />
 
+                  {/* Categories with clear button to open interactive wheel */}
                   <View style={styles.menuFolioGrid}>
-                    {bucketCategories.map((cat) => (
-                      <View key={cat.id} style={styles.menuFolioCategoryBox}>
-                        <TouchableOpacity
-                          style={styles.menuFolioCategoryHeader}
-                          activeOpacity={0.8}
-                          onPress={() => {
-                            setSelectedCategory(cat);
-                            setSubModalMode('dial');
-                          }}
-                        >
-                          <Text style={styles.menuFolioCatIcon}>{cat.icon}</Text>
-                          <Text style={styles.menuFolioCatTitle}>
-                            {(lang === 'fa' ? cat.titleFa : cat.titleEn).replace('\n', ' ')}
-                          </Text>
-                          <Text style={styles.menuFolioCatArrow}>›</Text>
-                        </TouchableOpacity>
-
-                        <View style={styles.menuFolioDishesPillsRow}>
-                          {(lang === 'fa' ? cat.dishesFa : cat.dishesEn).slice(0, 3).map((dishName, dIdx) => (
+                    {bucketCategories.map((cat) => {
+                      const allDishes = lang === 'fa' ? cat.dishesFa : cat.dishesEn;
+                      return (
+                        <View key={cat.id} style={styles.menuFolioCategoryBox}>
+                          <View style={styles.menuFolioCategoryHeader}>
+                            <Text style={styles.menuFolioCatIcon}>{cat.icon}</Text>
+                            <Text style={styles.menuFolioCatTitle}>
+                              {(lang === 'fa' ? cat.titleFa : cat.titleEn).replace('\n', ' ')}
+                            </Text>
+                            {/* Explicit button explaining how to view on wheel */}
                             <TouchableOpacity
-                              key={dIdx}
-                              style={styles.menuFolioDishPill}
+                              style={styles.viewOnWheelActionBtn}
                               onPress={() => {
                                 setSelectedCategory(cat);
-                                handleSelectDish(dishName, cat.titleEn, true);
+                                setSubModalMode('dial');
                               }}
                             >
-                              <Text style={styles.menuFolioDishPillText} numberOfLines={1}>
-                                {dishName}
+                              <Text style={styles.viewOnWheelActionText}>
+                                {lang === 'fa' ? 'مشاهده در گردونه ‹' : 'Open in Wheel ‹'}
                               </Text>
                             </TouchableOpacity>
-                          ))}
+                          </View>
+
+                          {/* Displays all items for complete matching */}
+                          <View style={styles.menuFolioDishesPillsRow}>
+                            {allDishes.map((dishName, dIdx) => (
+                              <TouchableOpacity
+                                key={dIdx}
+                                style={styles.menuFolioDishPill}
+                                onPress={() => {
+                                  setSelectedCategory(cat);
+                                  handleSelectDish(dishName, cat.titleEn, true);
+                                }}
+                              >
+                                <Text style={styles.menuFolioDishPillText} numberOfLines={1}>
+                                  {dishName}
+                                </Text>
+                              </TouchableOpacity>
+                            ))}
+                          </View>
                         </View>
-                      </View>
-                    ))}
+                      );
+                    })}
                   </View>
                 </View>
               );
             })}
           </ScrollView>
         ) : activeTab === 'wheel' ? (
-          /* TAB 2: DIAL */
+          /* TAB 2: DIAL (WITH DUAL-RING ARCHITECTURE WHEN > 9 ITEMS) */
           <View style={{ flex: 1, width: '100%', justifyContent: 'space-between', alignItems: 'center' }}>
             <View style={{ width: '100%', alignItems: 'center' }}>
               <View style={[styles.cornerLogoBadge, styles.centeredLogoBadge, { width: dial.badgeW * 1.3, height: dial.badgeH * 1.1 }]}>
@@ -1608,62 +1606,128 @@ Follow the required tags and 4-part skeleton:
                     />
                   </View>
 
-                  {/* Adaptive Category Circles */}
-                  {displayedCategories.map((cat, index) => {
+                  {/* Dual-Ring Distribution Logic: Max 9 on Outer Ring, remainder on Inner Ring */}
+                  {(() => {
                     const total = displayedCategories.length;
-                    const stepAngle = 360 / total;
-                    const angle = (index * stepAngle - 90) * (Math.PI / 180);
-                    const isMagnified = magnifiedId === cat.id;
-                    const isSpinLightActive = isSpinning && spinLightIndex === index;
+                    const outerCount = Math.min(total, 9);
+                    const innerCount = Math.max(0, total - outerCount);
 
-                    const circleDiameter = total <= 4 ? 76 : total <= 7 ? 68 : 50;
-                    const ringRadius = dial.size / 2 - (total <= 7 ? 42 : 34);
-
-                    const x = dial.center + ringRadius * Math.cos(angle) - circleDiameter / 2;
-                    const y = dial.center + ringRadius * Math.sin(angle) - circleDiameter / 2;
+                    const outerItems = displayedCategories.slice(0, outerCount);
+                    const innerItems = displayedCategories.slice(outerCount);
 
                     return (
-                      <TouchableOpacity
-                        key={cat.id}
-                        style={[
-                          styles.bucketCircle,
-                          {
-                            left: x,
-                            top: y,
-                            width: circleDiameter,
-                            height: circleDiameter,
-                            borderRadius: circleDiameter / 2,
-                          },
-                          isMagnified && styles.circleMagnifiedLarge,
-                          isSpinLightActive && styles.circleSpinLightGlowing,
-                        ]}
-                        activeOpacity={0.9}
-                        delayLongPress={200}
-                        onPressIn={() => !isSpinning && setMagnifiedId(cat.id)}
-                        onPressOut={() => setMagnifiedId(null)}
-                        onPress={() => {
-                          if (isSpinning) return;
-                          setMagnifiedId(null);
-                          setSelectedCategory(cat);
-                          setSubModalMode('dial');
-                        }}
-                      >
-                        <Text style={[styles.bucketCircleIcon, { fontSize: total <= 7 ? 20 : 15 }]}>
-                          {isSpinLightActive ? '✨' : cat.icon}
-                        </Text>
-                        <Text
-                          style={[
-                            styles.bucketCircleLabel,
-                            { fontSize: total <= 4 ? 11 : total <= 7 ? 9.5 : 7.5 },
-                            isMagnified && styles.labelMagnified,
-                          ]}
-                          numberOfLines={2}
-                        >
-                          {lang === 'fa' ? cat.titleFa : cat.titleEn}
-                        </Text>
-                      </TouchableOpacity>
+                      <>
+                        {/* Outer Ring Elements */}
+                        {outerItems.map((cat, index) => {
+                          const stepAngle = 360 / outerCount;
+                          const angle = (index * stepAngle - 90) * (Math.PI / 180);
+                          const isMagnified = magnifiedId === cat.id;
+                          const isSpinLightActive = isSpinning && spinLightIndex === index;
+
+                          const circleDiameter = outerCount <= 4 ? 76 : outerCount <= 7 ? 68 : 52;
+                          const ringRadius = dial.size / 2 - (outerCount <= 7 ? 42 : 36);
+
+                          const x = dial.center + ringRadius * Math.cos(angle) - circleDiameter / 2;
+                          const y = dial.center + ringRadius * Math.sin(angle) - circleDiameter / 2;
+
+                          return (
+                            <TouchableOpacity
+                              key={cat.id}
+                              style={[
+                                styles.bucketCircle,
+                                {
+                                  left: x,
+                                  top: y,
+                                  width: circleDiameter,
+                                  height: circleDiameter,
+                                  borderRadius: circleDiameter / 2,
+                                },
+                                isMagnified && styles.circleMagnifiedLarge,
+                                isSpinLightActive && styles.circleSpinLightGlowing,
+                              ]}
+                              activeOpacity={0.9}
+                              delayLongPress={200}
+                              onPressIn={() => !isSpinning && setMagnifiedId(cat.id)}
+                              onPressOut={() => setMagnifiedId(null)}
+                              onPress={() => {
+                                if (isSpinning) return;
+                                setMagnifiedId(null);
+                                setSelectedCategory(cat);
+                                setSubModalMode('dial');
+                              }}
+                            >
+                              <Text style={[styles.bucketCircleIcon, { fontSize: outerCount <= 7 ? 20 : 15 }]}>
+                                {isSpinLightActive ? '✨' : cat.icon}
+                              </Text>
+                              <Text
+                                style={[
+                                  styles.bucketCircleLabel,
+                                  { fontSize: outerCount <= 4 ? 11 : outerCount <= 7 ? 9.5 : 7.5 },
+                                  isMagnified && styles.labelMagnified,
+                                ]}
+                                numberOfLines={2}
+                              >
+                                {lang === 'fa' ? cat.titleFa : cat.titleEn}
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+
+                        {/* Inner Ring Elements (if > 9 items) */}
+                        {innerItems.map((cat, index) => {
+                          const stepAngle = 360 / innerCount;
+                          const angle = (index * stepAngle - 90) * (Math.PI / 180);
+                          const isMagnified = magnifiedId === cat.id;
+                          const isSpinLightActive = isSpinning && spinLightIndex === (outerCount + index);
+
+                          const circleDiameter = 40;
+                          const ringRadius = dial.innerRadius;
+
+                          const x = dial.center + ringRadius * Math.cos(angle) - circleDiameter / 2;
+                          const y = dial.center + ringRadius * Math.sin(angle) - circleDiameter / 2;
+
+                          return (
+                            <TouchableOpacity
+                              key={cat.id}
+                              style={[
+                                styles.bucketCircle,
+                                styles.innerBucketCircle,
+                                {
+                                  left: x,
+                                  top: y,
+                                  width: circleDiameter,
+                                  height: circleDiameter,
+                                  borderRadius: circleDiameter / 2,
+                                },
+                                isMagnified && styles.circleMagnifiedLarge,
+                                isSpinLightActive && styles.circleSpinLightGlowing,
+                              ]}
+                              activeOpacity={0.9}
+                              delayLongPress={200}
+                              onPressIn={() => !isSpinning && setMagnifiedId(cat.id)}
+                              onPressOut={() => setMagnifiedId(null)}
+                              onPress={() => {
+                                if (isSpinning) return;
+                                setMagnifiedId(null);
+                                setSelectedCategory(cat);
+                                setSubModalMode('dial');
+                              }}
+                            >
+                              <Text style={[styles.bucketCircleIcon, { fontSize: 13 }]}>
+                                {isSpinLightActive ? '✨' : cat.icon}
+                              </Text>
+                              <Text
+                                style={[styles.bucketCircleLabel, { fontSize: 6.8 }, isMagnified && styles.labelMagnified]}
+                                numberOfLines={2}
+                              >
+                                {lang === 'fa' ? cat.titleFa : cat.titleEn}
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </>
                     );
-                  })}
+                  })()}
                 </ImageBackground>
               </Animated.View>
             </View>
@@ -1898,7 +1962,7 @@ Follow the required tags and 4-part skeleton:
         </View>
       </Modal>
 
-      {/* BUTLER TAB CONTENT */}
+      {/* BUTLER TAB CONTENT (WITH INTERACTIVE COURSE SELECTOR) */}
       {activeTab === 'butler' && (
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -1912,9 +1976,7 @@ Follow the required tags and 4-part skeleton:
                   {lang === 'fa' ? 'میزبان درباری (Persian Butler)' : 'Persian Dining Butler (میزبان)'}
                 </Text>
                 <Text style={styles.heritageModalPersian}>
-                  {selectedBucket === 'all'
-                    ? (lang === 'fa' ? 'طراحی متناسب ضیافت بر اساس تعداد نفرات و رژیم غذایی' : 'Banquet curation & dietary tailoring')
-                    : (lang === 'fa' ? `طراحی متمرکز بر دسته: ${COURSE_BUCKETS.find((b) => b.id === selectedBucket)?.titleFa}` : `Focused on Course: ${COURSE_BUCKETS.find((b) => b.id === selectedBucket)?.titleEn}`)}
+                  {lang === 'fa' ? 'طراحی متناسب ضیافت بر اساس تعداد نفرات و دوره انتخابی' : 'Banquet curation tailored to your selected course'}
                 </Text>
               </View>
 
@@ -1941,15 +2003,31 @@ Follow the required tags and 4-part skeleton:
               </View>
             </View>
 
-            <View style={styles.butlerBucketIndicator}>
-              <Text style={styles.butlerBucketIndicatorText}>
-                {lang === 'fa'
-                  ? `منوی فعال: ${COURSE_BUCKETS.find((b) => b.id === selectedBucket)?.titleFa}`
-                  : `Active Course: ${COURSE_BUCKETS.find((b) => b.id === selectedBucket)?.titleEn}`}
+            {/* Interactive Course Selector Inside Butler */}
+            <View style={styles.butlerInteractiveCourseSection}>
+              <Text style={styles.butlerInteractiveCourseLabel}>
+                {lang === 'fa' ? 'دوره غذایی مورد نظر را انتخاب کنید:' : 'Select Target Course for Banquet:'}
               </Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, paddingVertical: 4 }}>
+                {COURSE_BUCKETS.map((b) => {
+                  const isActive = selectedBucket === b.id;
+                  return (
+                    <TouchableOpacity
+                      key={b.id}
+                      style={[styles.butlerCourseOptionPill, isActive && styles.butlerCourseOptionPillActive]}
+                      onPress={() => setSelectedBucket(b.id)}
+                    >
+                      <Text style={styles.butlerCourseOptionIcon}>{b.icon}</Text>
+                      <Text style={[styles.butlerCourseOptionText, isActive && styles.butlerCourseOptionTextActive]}>
+                        {lang === 'fa' ? b.titleFa : b.titleEn}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
             </View>
 
-            <ScrollView ref={butlerScrollRef} style={{ flex: 1, marginVertical: 6 }} showsVerticalScrollIndicator={true} keyboardShouldPersistTaps="handled">
+            <ScrollView ref={butlerScrollRef} style={{ flex: 1, marginVertical: 4 }} showsVerticalScrollIndicator={true} keyboardShouldPersistTaps="handled">
               {isFusionEnabled && (
                 <View style={styles.cuisineSelectorCard}>
                   <Text style={styles.cuisineSelectorHeading}>
@@ -2221,7 +2299,7 @@ Follow the required tags and 4-part skeleton:
         </View>
       </Modal>
 
-      {/* SUBCATEGORY DIAL & TABBED RECIPE MODAL */}
+      {/* SUBCATEGORY DIAL & TABBED RECIPE MODAL (WITH DUAL-RING ARCHITECTURE WHEN > 9 DISHES) */}
       <Modal
         visible={selectedCategory !== null}
         animationType="fade"
@@ -2259,6 +2337,7 @@ Follow the required tags and 4-part skeleton:
                   <View style={{ width: dial.headerSideW }} />
                 </View>
 
+                {/* Sub-Dish Dual Ring Dial (Max 9 items outer ring, rest inner ring) */}
                 <View style={[styles.dialViewport, { width: dial.size, height: dial.size }, { marginTop: 20, alignSelf: 'center' }]}>
                   <View style={[styles.dialContainer, { width: dial.size, height: dial.size }]}>
                     <ImageBackground
@@ -2274,46 +2353,102 @@ Follow the required tags and 4-part skeleton:
                         />
                       </View>
 
-                      {(lang === 'fa' ? selectedCategory?.dishesFa : selectedCategory?.dishesEn)?.map((dish, index) => {
-                        const total = selectedCategory.dishesEn.length;
-                        const stepAngle = 360 / total;
-                        const angle = (index * stepAngle - 90) * (Math.PI / 180);
-                        const subRadius = dial.subRadius;
-                        const isDishMagnified = magnifiedId === dish;
-                        const circleSize = dial.subDiameter;
-                        const x = dial.center + subRadius * Math.cos(angle) - circleSize / 2;
-                        const y = dial.center + subRadius * Math.sin(angle) - circleSize / 2;
+                      {(() => {
+                        const dishes = (lang === 'fa' ? selectedCategory?.dishesFa : selectedCategory?.dishesEn) || [];
+                        const total = dishes.length;
+                        const outerCount = Math.min(total, 9);
+                        const innerCount = Math.max(0, total - outerCount);
+
+                        const outerDishes = dishes.slice(0, outerCount);
+                        const innerDishes = dishes.slice(outerCount);
 
                         return (
-                          <TouchableOpacity
-                            key={dish}
-                            style={[
-                              styles.subDishCircle,
-                              circleBox(circleSize),
-                              { left: x, top: y },
-                              isDishMagnified && styles.subDishMagnified,
-                            ]}
-                            activeOpacity={0.9}
-                            delayLongPress={200}
-                            onPressIn={() => setMagnifiedId(dish)}
-                            onPressOut={() => setMagnifiedId(null)}
-                            onPress={() => {
-                              setMagnifiedId(null);
-                              handleSelectDish(dish, selectedCategory.titleEn, false);
-                            }}
-                          >
-                            <Text style={[styles.subDishIcon, isDishMagnified && { fontSize: 22 }]}>
-                              {selectedCategory.icon}
-                            </Text>
-                            <Text
-                              style={[styles.subDishLabel, isDishMagnified && styles.subDishLabelMagnified]}
-                              numberOfLines={isDishMagnified ? 3 : 2}
-                            >
-                              {dish}
-                            </Text>
-                          </TouchableOpacity>
+                          <>
+                            {/* Outer Ring Dishes */}
+                            {outerDishes.map((dish, index) => {
+                              const stepAngle = 360 / outerCount;
+                              const angle = (index * stepAngle - 90) * (Math.PI / 180);
+                              const subRadius = dial.subRadius;
+                              const isDishMagnified = magnifiedId === dish;
+                              const circleSize = dial.subDiameter;
+                              const x = dial.center + subRadius * Math.cos(angle) - circleSize / 2;
+                              const y = dial.center + subRadius * Math.sin(angle) - circleSize / 2;
+
+                              return (
+                                <TouchableOpacity
+                                  key={dish}
+                                  style={[
+                                    styles.subDishCircle,
+                                    circleBox(circleSize),
+                                    { left: x, top: y },
+                                    isDishMagnified && styles.subDishMagnified,
+                                  ]}
+                                  activeOpacity={0.9}
+                                  delayLongPress={200}
+                                  onPressIn={() => setMagnifiedId(dish)}
+                                  onPressOut={() => setMagnifiedId(null)}
+                                  onPress={() => {
+                                    setMagnifiedId(null);
+                                    handleSelectDish(dish, selectedCategory?.titleEn || '', false);
+                                  }}
+                                >
+                                  <Text style={[styles.subDishIcon, isDishMagnified && { fontSize: 22 }]}>
+                                    {selectedCategory?.icon}
+                                  </Text>
+                                  <Text
+                                    style={[styles.subDishLabel, isDishMagnified && styles.subDishLabelMagnified]}
+                                    numberOfLines={isDishMagnified ? 3 : 2}
+                                  >
+                                    {dish}
+                                  </Text>
+                                </TouchableOpacity>
+                              );
+                            })}
+
+                            {/* Inner Ring Dishes (Remaining items beyond 9) */}
+                            {innerDishes.map((dish, index) => {
+                              const stepAngle = 360 / innerCount;
+                              const angle = (index * stepAngle - 90) * (Math.PI / 180);
+                              const innerSubRadius = dial.innerRadius;
+                              const isDishMagnified = magnifiedId === dish;
+                              const circleSize = 46;
+                              const x = dial.center + innerSubRadius * Math.cos(angle) - circleSize / 2;
+                              const y = dial.center + innerSubRadius * Math.sin(angle) - circleSize / 2;
+
+                              return (
+                                <TouchableOpacity
+                                  key={dish}
+                                  style={[
+                                    styles.subDishCircle,
+                                    styles.innerSubDishCircle,
+                                    circleBox(circleSize),
+                                    { left: x, top: y },
+                                    isDishMagnified && styles.subDishMagnified,
+                                  ]}
+                                  activeOpacity={0.9}
+                                  delayLongPress={200}
+                                  onPressIn={() => setMagnifiedId(dish)}
+                                  onPressOut={() => setMagnifiedId(null)}
+                                  onPress={() => {
+                                    setMagnifiedId(null);
+                                    handleSelectDish(dish, selectedCategory?.titleEn || '', false);
+                                  }}
+                                >
+                                  <Text style={[styles.subDishIcon, { fontSize: 13 }, isDishMagnified && { fontSize: 20 }]}>
+                                    {selectedCategory?.icon}
+                                  </Text>
+                                  <Text
+                                    style={[styles.subDishLabel, { fontSize: 6.8 }, isDishMagnified && styles.subDishLabelMagnified]}
+                                    numberOfLines={2}
+                                  >
+                                    {dish}
+                                  </Text>
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </>
                         );
-                      })}
+                      })()}
                     </ImageBackground>
                   </View>
                 </View>
@@ -2927,20 +3062,46 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     fontSize: 12,
   },
-  butlerBucketIndicator: {
-    backgroundColor: 'rgba(197, 155, 39, 0.2)',
+  butlerInteractiveCourseSection: {
+    backgroundColor: 'rgba(15, 23, 42, 0.95)',
     borderWidth: 1,
-    borderColor: '#f6d860',
-    borderRadius: 8,
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-    marginBottom: 6,
-    alignSelf: 'flex-start',
+    borderColor: '#c59b27',
+    borderRadius: 10,
+    padding: 8,
+    marginBottom: 8,
   },
-  butlerBucketIndicatorText: {
-    fontSize: 10.5,
+  butlerInteractiveCourseLabel: {
+    fontSize: 11,
     fontWeight: '800',
-    color: '#f6d860',
+    color: '#fef08a',
+    marginBottom: 4,
+  },
+  butlerCourseOptionPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(12, 27, 51, 0.9)',
+    borderWidth: 1,
+    borderColor: '#94a3b8',
+    borderRadius: 14,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    gap: 4,
+  },
+  butlerCourseOptionPillActive: {
+    backgroundColor: '#c59b27',
+    borderColor: '#f6d860',
+  },
+  butlerCourseOptionIcon: {
+    fontSize: 12,
+  },
+  butlerCourseOptionText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#cbd5e1',
+  },
+  butlerCourseOptionTextActive: {
+    color: '#0c1b33',
+    fontWeight: '900',
   },
   searchBarContainer: {
     width: '100%',
@@ -3110,6 +3271,11 @@ const styles = StyleSheet.create({
     zIndex: 25,
     padding: 2,
   },
+  innerBucketCircle: {
+    backgroundColor: 'rgba(16, 36, 68, 0.98)',
+    borderColor: '#eab308',
+    borderWidth: 1.5,
+  },
   bucketCircleIcon: {
     fontSize: 17,
   },
@@ -3151,6 +3317,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     zIndex: 25,
     padding: 3,
+  },
+  innerSubDishCircle: {
+    backgroundColor: 'rgba(16, 36, 68, 0.98)',
+    borderColor: '#eab308',
+    borderWidth: 1.5,
   },
   subDishMagnified: {
     zIndex: 100,
@@ -3314,9 +3485,15 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
   },
-  menuFolioCatArrow: {
-    color: '#f6d860',
-    fontSize: 16,
+  viewOnWheelActionBtn: {
+    backgroundColor: '#c59b27',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  viewOnWheelActionText: {
+    color: '#0c1b33',
+    fontSize: 10,
     fontWeight: '900',
   },
   menuFolioDishesPillsRow: {
